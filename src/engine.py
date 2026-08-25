@@ -182,6 +182,11 @@ class HoldemGame:
         self.board: list[Card] = []
         self.current_bet = 0
         self.min_raise = bb
+        # Optional narration hooks (default no-ops), used by the interactive CLI:
+        #   on_action(player, action, chips_put)  — after each applied action
+        #   on_street(street_name, board)         — when a street's cards are dealt
+        self.on_action = None
+        self.on_street = None
 
     # -- helpers ---------------------------------------------------------------
     def _alive(self) -> list[int]:
@@ -240,6 +245,8 @@ class HoldemGame:
         self.min_raise = self.bb
 
         # preflop
+        if self.on_street:
+            self.on_street("preflop", [])
         self._betting_round(preflop_first, policies, "preflop")
         # flop / turn / river
         for street, n_cards in (("flop", 3), ("turn", 1), ("river", 1)):
@@ -247,6 +254,8 @@ class HoldemGame:
                 break
             for _ in range(n_cards):
                 self.board.append(deck.deal())
+            if self.on_street:
+                self.on_street(street, list(self.board))
             if len(self._active_bettors()) >= 1 and self._someone_can_bet():
                 self._reset_street()
                 self._betting_round(postflop_first, policies, street)
@@ -348,6 +357,7 @@ class HoldemGame:
         raise ValueError(f"unknown action {act!r}")
 
     def _apply(self, p: Player, action, acted: set[int]):
+        before = p.stack
         kind = action[0]
         if kind == "fold":
             p.folded = True
@@ -367,6 +377,8 @@ class HoldemGame:
                     self.min_raise = inc
                     acted.clear()
             acted.add(p.seat)
+        if self.on_action:
+            self.on_action(p, action, before - p.stack)
 
     # -- pots & showdown -------------------------------------------------------
     def _build_pots(self) -> list[dict]:
