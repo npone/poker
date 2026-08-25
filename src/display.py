@@ -75,7 +75,7 @@ RankStrs = {
 
 
 def NumToStr( n ):
-    if n == 1:  return 'A'
+    if n == 1 or n == 14: return 'A'   # 14 = Ace played high (Broadway straight)
     if n == 11: return 'J'
     if n == 12: return 'Q'
     if n == 13: return 'K'

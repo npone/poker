@@ -127,34 +127,42 @@ class Table:
 def CheckFlush( ca ):
     suits = ca[ 0 , : ]
     nums = ca[ 1 , : ]
-    for i in range( 4 ):
+    for i in range( 1 , 5 ):        # suits are encoded 1..4 (1:Hearts .. 4:Clubs)
         suited = np.where( suits == i )[ 0 ]
         if len( suited ) >= 5:      # Flush found
             key = np.amax( nums[ suited ] )
             return True, key
     return False, None              # not found
 
+def StraightHigh( ranks ):
+    # Highest card of a 5-in-a-row straight within `ranks` (values 1..13), counting the
+    # Ace (1) as BOTH high (14, for Broadway 10-J-Q-K-A) and low (for the wheel A-2-3-4-5).
+    # Returns the high-card rank (14 for Broadway, 5 for the wheel), or None if no straight.
+    present = set( int( r ) for r in ranks )
+    if 1 in present:
+        present.add( 14 )       # Ace also plays high
+    for high in range( 14 , 4 , -1 ):           # prefer the best straight
+        if all( ( high - offset ) in present for offset in range( 5 ) ):
+            return high
+    return None
+
 def CheckStraight( ca ):
+    high = StraightHigh( ca[ 1 , : ] )
+    return ( True, high ) if high is not None else ( False, None )
+
+def CheckStraightFlush( ca ):
+    # A straight FLUSH needs five in a row WITHIN A SINGLE SUIT — checking a flush and a
+    # straight independently gives false positives (a flush plus an unrelated straight).
     suits = ca[ 0 , : ]
     nums = ca[ 1 , : ]
-    srtd = np.flip( np.sort( nums ), axis = 0 )
-    last = srtd[ 0 ]
-    key = srtd[ 0 ]
-    v = 0
-    for s in srtd:
-        if last - s > 1:
-            v = 0
-            last = s
-            key = s
-        elif last - s == 0:
-            last = s
-        elif last - s == 1:
-            v += 1
-            last = s 
-    if v >= 4:                  # Straight found
-        return True, key
-    else:                       # not found
-        return False, None
+    best = None
+    for i in range( 1 , 5 ):
+        suited = nums[ np.where( suits == i )[ 0 ] ]
+        if len( suited ) >= 5:
+            high = StraightHigh( suited )
+            if high is not None and ( best is None or high > best ):
+                best = high
+    return ( True, best ) if best is not None else ( False, None )
 
 def CheckMultiples( ca ):    # cards is a 2xN array (N=7), row 0: suits, row1: numbers
     suits = ca[ 0 , : ]
@@ -242,6 +250,7 @@ def CheckPair(PairKey1):
 # score hand
 def ScoreHand( cards ):
     # Scores:
+        # 9: Royal Flush
         # 8: Straight Flush
         # 7: Four of a Kind
         # 6: Full house
@@ -252,12 +261,14 @@ def ScoreHand( cards ):
         # 1: Pair
         # 0: High Card
     c = CardsToArray( cards )
-    
+
+    res_sf = CheckStraightFlush(c)
+    if res_sf[0]:
+        return ( 9 if res_sf[1] == 14 else 8 ), res_sf[1]   # Royal / Straight Flush
+
     res_flsh = CheckFlush(c)
     res_strt = CheckStraight(c)
-    if res_flsh[0] and res_strt[0]:
-        return 8, res_strt[1]                       # Straight Flush
-    
+
     (QuadKey, TripleKey1, TripleKey2, PairKey1, PairKey2, PairKey3) = CheckMultiples(c)
     
     res_4 = CheckFour(QuadKey)
