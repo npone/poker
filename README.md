@@ -9,6 +9,7 @@ renderer). Pure standard library — no dependencies.
 |------|-----------|
 | `engine.py` | **The backend engine.** Cards/Deck, a correct hand evaluator (with kickers), betting rounds, side pots, showdown, and multi-hand play. |
 | `test_engine.py` | Regression suite for the engine (evaluator, betting, side pots, showdown, integration, and a randomized fuzz). |
+| `play.py` | **Interactive CLI** — play against the bots in your terminal. |
 | `poker.py` | Headless demo — plays a short game and prints each hand. |
 | `pokerClass.py`, `display.py` | Original hand classifier + ASCII card art. |
 | `demo_ascii.py`, `test_evaluator.py` | Legacy ASCII deal demo + tests for the original classifier. |
@@ -17,10 +18,13 @@ renderer). Pure standard library — no dependencies.
 
 ```bash
 cd src
-python poker.py                         # demo game
-python test_engine.py                   # engine tests (standalone)
-python -m pytest test_engine.py test_evaluator.py -q   # everything, via pytest
+python play.py                          # play against the bots (you + 3 bots)
+python play.py --players 6 --stack 200  # options: --players --stack --sb --bb --seed
+python poker.py                         # watch a bot-vs-bot demo game
+python -m pytest test_engine.py test_evaluator.py test_play.py -q   # all tests
 ```
+
+At your turn: `k`=check  `c`=call  `f`=fold  `b/r <N>`=bet/raise to N  `a`=all-in  `q`=quit.
 
 ## Using the engine
 
