@@ -312,6 +312,8 @@ class HoldemGame:
                 return
             if all(p.seat in acted and p.street_bet == self.current_bet for p in active):
                 return
+            if len(active) == 1 and active[0].street_bet >= self.current_bet:
+                return                                   # nobody left who could answer a bet
             seat = order[i % n]
             i += 1
             p = self.players[seat]
@@ -415,6 +417,13 @@ class HoldemGame:
         return pots
 
     def _settle(self) -> list[dict]:
+        # uncalled chips (the top contributor's excess over the next highest) go back to their
+        # owner; otherwise, if that player folded, the layer would have no one eligible to win it
+        top = max(self.players, key=lambda p: p.contributed)
+        second = max((p.contributed for p in self.players if p is not top), default=0)
+        if top.contributed > second:
+            top.stack += top.contributed - second
+            top.contributed = second
         pots = self._build_pots()
         order_from_button = [(self.button + 1 + k) % self.num for k in range(self.num)]
         results = []
