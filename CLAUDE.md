@@ -1,14 +1,21 @@
 # poker
 
-A headless **No-Limit Texas Hold'em** engine in Python plus an interactive terminal CLI, and a
-separate legacy ASCII card-art / hand-classifier codebase that predates it. Everything lives in
-`src/`. The modern engine (`engine.py`) is stdlib-only; the legacy half needs numpy.
+A **No-Limit Texas Hold'em** game: a headless Python engine, a UI-agnostic session layer, a
+JSON HTTP API, a static web client (live at https://poker.npone.dev), an interactive terminal
+CLI, and a separate legacy ASCII card-art / hand-classifier codebase that predates it. Python is
+in `src/`, the web client in `web/`, deployment in `deploy/`.
+
+**Goal (Ning, 2026-10-18):** a complete poker game. Stage 1 is the web interface; iOS and
+Android apps follow **for the same underlying program**. So the layering is the point:
+`engine.py` (rules) → `table.py` (session, JSON) → `server.py` (`/api/v1`) → clients. **No game
+rule may live in a client**; the mobile apps are thin clients of `/api/v1` (server-authoritative,
+decided 2026-10-18 — no on-device engine, no offline play). Stage 1 is you vs bots only.
 
 **Repo:** `git@github.com:npone/poker.git` (branch `master`)
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-18
 
-No network, no cloud, no credentials — nothing here costs money or touches anything outside the
-repo.
+No cloud and no credentials — nothing here costs money. The one thing outside the repo is the
+deployed service (`poker.service`, and the `poker.npone.dev` rule in the shared tunnel config).
 
 ---
 
@@ -18,8 +25,9 @@ repo.
   **There is no project `.venv`** and none is needed.
 - Not a packaged project: no `pyproject.toml`, no `setup.py`, nothing to install. Modules are
   imported by bare name (`import engine`), so **the import path is `src/`**.
-- Deps: `engine.py` / `play.py` / `poker.py` / `test_engine.py` / `test_play.py` are **pure
-  stdlib**. `pokerClass.py`, `display.py`, `demo_ascii.py`, `test.py`, `test_evaluator.py`
+- Deps: `engine.py` / `table.py` / `bots.py` / `play.py` / `poker.py` and their tests are **pure
+  stdlib**; `server.py` / `test_server.py` need **fastapi, uvicorn, httpx** (in the shared env).
+  The legacy files (`pokerClass.py`, `display.py`, `demo_ascii.py`, `test.py`, `test_evaluator.py`)
   import **numpy** (2.4.6, present in the shared env).
 - Shared-env policy and the env lock: `/home/nliu/dev/devenv/python-env/`.
 
@@ -32,7 +40,13 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 | File | Lines | What it is |
 |------|------:|-----------|
 | `engine.py` | 473 | **The engine (current).** `Card`, `Deck`, `evaluate5`/`evaluate`/`hand_name`, `Player`, `HoldemGame` (betting rounds, side pots, showdown, multi-hand), built-in bot policies |
-| `play.py` | 182 | **Interactive CLI** (argparse) — you + bots in the terminal |
+| `table.py` | — | **Session layer** every front end drives: hero (seat 0) vs bots; `deal()`, `act(kind, amount)`, `state()` → JSON snapshot with an `events` log. Hides other players' hole cards except at showdown |
+| `server.py` | — | **HTTP API** `/api/v1` (FastAPI) over `table.py`, + serves `web/`. In-memory tables, capped/idle-evicted, per-table lock |
+| `bots.py` | — | Bot policy (`make_bot`, `BOT_NAMES`), shared by CLI and server; `play.py` re-exports it |
+| `play.py` | — | **Interactive CLI** (argparse) — you + bots in the terminal |
+| `test_table.py` / `test_server.py` | — | Session fuzz (chips conserved, cards hidden, games end, JSON-able) / HTTP contract |
+| `../web/` | — | Static web client (`index.html`, `app.js`, `style.css`), no build step, no framework, **no game rules** |
+| `../deploy/` | — | `poker.service` + `install.sh` (service + tunnel route with rollback) |
 | `poker.py` | 55 | Headless bot-vs-bot demo; prints each hand |
 | `test_engine.py` | 228 | Engine regression suite: evaluator, blinds, raise/reopen, pot building, showdown, fuzz, full-game termination |
 | `test_play.py` | 65 | Tests the CLI's human input parser and the bot policy's legality |
@@ -45,15 +59,16 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 
 ---
 
-## Commands (verified 2026-10-17)
+## Commands (verified 2026-10-18)
 
 ```bash
 cd /home/nliu/dev/poker/src
 
-# Tests — 27 passed in ~1.9s  ✅
+# Tests — 37 passed in ~3s  ✅  (also the .taskhub.json `test` command)
 python -m pytest -q
-python -m pytest test_engine.py test_evaluator.py test_play.py -q   # README form, same 27
-# (also passes when run from the repo root: 27 passed)
+
+# Web game locally
+python -m uvicorn server:app --host 127.0.0.1 --port 8094   # http://127.0.0.1:8094/
 
 # Interactive CLI  ✅ --help verified
 python play.py
@@ -67,12 +82,12 @@ python demo_ascii.py   # legacy: ASCII-rendered deal + score (needs numpy)
 python test.py         # legacy scratch: prints ASCII cards only
 ```
 
-Breakdown of the 27: **19** in `test_engine.py`, **4** in `test_evaluator.py`, **4** in
-`test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
+Breakdown of the 37: **20** in `test_engine.py`, **5** in `test_table.py`, **4** each in
+`test_evaluator.py`, `test_play.py`, `test_server.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
 ASCII cards at import).
 
 **Lint:** no config, no CI, not a project gate. `ruff check .` (ruff 0.15.16 defaults) reports
-**41 pre-existing errors** — 27 `E701` + 8 `E702` (the deliberate one-line `if x: return` and
+**46 errors** — 27 `E701` + 13 `E702` (the deliberate one-line `if x: return` and
 `a; assert b` style used throughout `engine.py` and the tests), 3 `F841`, 2 `F401`, 1 `E722`.
 These are stylistic and intentional; don't mass-fix them.
 
@@ -94,6 +109,9 @@ g.on_street = fn   # optional narration hook: (street_name, board)
 result = g.play_hand([e.calling_station, e.calling_station, e.fold_to_bet])
 g.play(policies, hands=None)   # until one player holds all the chips
 g.advance_button()
+
+h = g.hand(order=None)         # step form: generator; next(h) -> view, h.send(action) -> view,
+                               # StopIteration.value = the play_hand result. play_hand drives it.
 ```
 
 `action` is one of `('fold',)`, `('check',)`, `('call',)`, `('raise', total)`, `('allin',)`,
@@ -143,24 +161,25 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 - Legacy evaluator bugs already fixed in `9441b5d` — do not reintroduce: Ace-high straights,
   clubs flush detection, royal flush, false straight-flush positives.
 - `test.py` is not a test module; don't "fix" it into one.
+- `_settle` refunds the top contributor's **uncalled** excess before building pots, and a betting
+  round ends when the only player able to bet owes nothing (fixed 2026-10-18: a heads-up SB
+  all-in for less than the BB used to give the BB an option, and folding it crashed `_settle`).
+- Browser check: Playwright does not support Ubuntu 20.04, so run it from the
+  `mcr.microsoft.com/playwright/python:v1.55.0-noble` image with `--network host`.
+- **Deployed from this checkout.** `poker.service` runs `src/` in place, so whatever is checked
+  out is what restarts. Keep `master` checked out here; `sudo systemctl restart poker` after a
+  merge. A restart drops every in-progress table (memory only).
 - `.gitignore` only covers `__pycache__/` and `*.pyc`. `src/.pytest_cache/` is in the tree but
   carries its own `.gitignore` (`*`), so it stays out of `git status`.
 
 ---
 
-## Current state (as of 2026-10-17)
+## Current state (as of 2026-10-18)
 
-- Branch `master` @ `e837a99`, in sync with `origin/master` — nothing staged, unstaged, or
-  unpushed. The only untracked file is **this `CLAUDE.md`** (added 2026-10-17, not yet committed).
-- History (newest first):
-  - `e837a99` / `af3d9b8` (2026-08-24) — PR #2 `cli-play`: "Add interactive CLI to play against
-    the bots (play.py) + engine narration hooks". **This is the CLI entry point:
-    `python src/play.py`** (argparse; no console_script, since the repo isn't packaged).
-  - `e7fe910` / `7a25542` / `9441b5d` (2026-08-24) — PR #1 `fix-evaluator-bugs`: complete
-    headless engine + regression tests, and the legacy evaluator fixes
-  - `b410e14` — set Jekyll theme; `b262a3b` — first commit (legacy ASCII code)
-- Test suite green: **27 passed**.
-- `README.md` is accurate about layout and commands, with one stale claim: it says
-  "Pure standard library — no dependencies", but the legacy half (`pokerClass.py`,
-  `display.py`, `demo_ascii.py`, `test.py`, `test_evaluator.py`) imports numpy. Only the
-  engine/CLI/demo path is dependency-free.
+- Stage 1 (web, you vs bots) built on branch `web-game`: step-by-step engine (`hand()`), the
+  uncalled-chip fix, `table.py`, `server.py`, `web/`, `deploy/`, `.taskhub.json`. 37 tests pass.
+  Verified in headless Chromium: desktop, phone 390 px (no horizontal scroll), dark mode, reload
+  resumes the table, no console errors.
+- Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
+  (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
+- `README.md` still claims nothing beyond what is true; it documents the API and deploy.
