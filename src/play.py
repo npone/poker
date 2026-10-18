@@ -11,11 +11,11 @@ import argparse
 import random
 
 import engine as e
+from bots import BOT_NAMES, make_bot  # noqa: F401  (re-exported; tests use play.make_bot)
 
 _SUIT_SYM = {0: "♣", 1: "♦", 2: "♥", 3: "♠"}   # ♣ ♦ ♥ ♠
 _RANK_CH = {**{r: str(r) for r in range(2, 10)},
             10: "T", 11: "J", 12: "Q", 13: "K", 14: "A"}
-BOT_NAMES = ["Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Heidi"]
 
 
 class Quit(Exception):
@@ -28,28 +28,6 @@ def fmt(card) -> str:
 
 def fmt_cards(cs) -> str:
     return " ".join(fmt(c) for c in cs) if cs else "-"
-
-
-def make_bot(seed: int):
-    """A simple heat-varied bot: bets/raises with a made hand, calls cheap, folds to pressure."""
-    rng = random.Random(seed)
-    aggression = rng.uniform(0.6, 1.4)
-
-    def policy(view):
-        made = e.evaluate(view["hole"] + view["board"])[0] if view["board"] else 0
-        pot = max(view["pot"], 1)
-        if view["can_check"]:
-            if made >= 3 and view["can_raise"] and rng.random() < 0.7 * aggression:
-                return ("raise", min(view["min_raise_to"] + int(pot * 0.6), view["allin_to"]))
-            return ("check",)
-        # facing a bet
-        odds = view["to_call"] / (pot + view["to_call"])
-        if made >= 4 and view["can_raise"]:
-            return ("raise", min(view["min_raise_to"] + int(pot * 0.75), view["allin_to"]))
-        if made >= 1 or odds < 0.2 * aggression:
-            return ("call",)
-        return ("fold",)
-    return policy
 
 
 def make_human(names):
