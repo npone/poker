@@ -40,12 +40,12 @@ PY
   cloudflared --config "$CFG" tunnel ingress validate || rollback "ingress validation failed"
   systemctl restart cloudflared || rollback "cloudflared restart failed"
   sleep 4
-  for u in https://npone.dev/ https://liveview.npone.dev/; do
-    curl -fsS -o /dev/null "$u" || rollback "$u stopped answering"
+  # every http route that existed before must still answer (5xx or no answer = broken)
+  for h in $(awk '/hostname:/{h=$NF} /service: https?:\/\//{print h}' "$BACKUP"); do
+    code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "https://$h/")"
+    [[ $code =~ ^[1-4][0-9][0-9]$ ]] || rollback "$h answered $code"
   done
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' https://dev176.npone.dev/mcp)" =~ ^(401|405|200)$ ]] \
-    || rollback "dev176.npone.dev stopped answering"
-  echo "==> tunnel restarted; npone.dev, liveview and dev176 still answer"
+  echo "==> tunnel restarted; every existing http route still answers"
   sudo -u nliu cloudflared tunnel route dns "$TUNNEL" "$HOST" \
     || echo "!! route dns $HOST failed — if a record for $HOST already exists, fix it in Cloudflare DNS"
 fi
