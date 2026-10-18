@@ -215,6 +215,19 @@ class HoldemGame:
     def play_hand(self, policies, order: list[Card] | None = None) -> dict:
         """Play one full hand. `policies[seat]` decides that seat's actions. `order` optionally
         fixes the deal order (for tests). Returns a result dict; stacks are updated in place."""
+        hand = self.hand(order)
+        try:
+            view = next(hand)
+            while True:
+                view = hand.send(policies[view["seat"]](view))
+        except StopIteration as done:
+            return done.value
+
+    def hand(self, order: list[Card] | None = None):
+        """Step-by-step form of play_hand, for callers that cannot block inside a policy (a web
+        or mobile UI). A generator: it yields the acting player's `view` at each decision and
+        takes that player's action back via `send(action)`. When the hand is over it raises
+        StopIteration whose `.value` is the play_hand result dict."""
         alive = self._alive()
         if len(alive) < 2:
             raise ValueError("need >= 2 players with chips")
@@ -247,7 +260,7 @@ class HoldemGame:
         # preflop
         if self.on_street:
             self.on_street("preflop", [])
-        self._betting_round(preflop_first, policies, "preflop")
+        yield from self._betting_round(preflop_first, "preflop")
         # flop / turn / river
         for street, n_cards in (("flop", 3), ("turn", 1), ("river", 1)):
             if len(self._not_folded()) <= 1:
@@ -258,7 +271,7 @@ class HoldemGame:
                 self.on_street(street, list(self.board))
             if len(self._active_bettors()) >= 1 and self._someone_can_bet():
                 self._reset_street()
-                self._betting_round(postflop_first, policies, street)
+                yield from self._betting_round(postflop_first, street)
 
         pots = self._settle()
         return {
@@ -282,7 +295,7 @@ class HoldemGame:
         self.min_raise = self.bb
 
     # -- betting ---------------------------------------------------------------
-    def _betting_round(self, first: int, policies, street: str):
+    def _betting_round(self, first: int, street: str):
         n = self.num
         order = [(first + k) % n for k in range(n)]
         acted: set[int] = set()                      # seats squared with current_bet since last raise
@@ -306,7 +319,8 @@ class HoldemGame:
                 continue
             if p.seat in acted and p.street_bet == self.current_bet:
                 continue
-            action = self._normalize(p, policies[seat], street)
+            view, lg = self._view(p, street)
+            action = self._coerce((yield view), lg, p)
             self._apply(p, action, acted)
 
     def _legal(self, p: Player) -> dict:
@@ -320,7 +334,7 @@ class HoldemGame:
         return {"to_call": to_call, "can_check": can_check, "can_raise": can_raise,
                 "min_raise_to": min_raise_to, "allin_to": allin_to}
 
-    def _normalize(self, p: Player, policy, street: str):
+    def _view(self, p: Player, street: str):
         lg = self._legal(p)
         view = {
             "seat": p.seat, "street": street, "hole": list(p.hole), "board": list(self.board),
@@ -333,8 +347,7 @@ class HoldemGame:
             "contrib": [q.contributed for q in self.players],
             "folded": [q.folded for q in self.players],
         }
-        act = policy(view)
-        return self._coerce(act, lg, p)
+        return view, lg
 
     def _coerce(self, act, lg, p: Player):
         """Force any policy output into a legal action (robust backend; tests pass legal input)."""
