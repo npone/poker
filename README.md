@@ -51,7 +51,8 @@ uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
 `state` is the view from your seat: players (stacks, bets, folded/all-in; other players' hole
 cards only when shown at showdown), board, pot, `to_act` (your legal options, or null), the last
 `result`, and `events` — everything that happened since the previous response, in order. Errors
-are 400 (illegal now), 404 (unknown/expired table) or 422 (malformed). Interactive docs at
+are 400 (illegal now), 404 (unknown/expired table), 422 (malformed), 429 (too many new tables
+from one client: 20 per 10 min) or 503 (server full). Interactive docs at
 `/api/docs`. Tables live in server memory: a restart ends them.
 
 ## Deploy ([private-host])
@@ -89,7 +90,8 @@ e.hand_name(_)                                  # 'Royal Flush'
 
 ## Correctness
 
-Standard NLHE rules: blinds, min-raise sizing, all-in **side pots**, split pots with the odd
+Standard NLHE rules: blinds, min-raise sizing, a short all-in does not reopen betting,
+uncalled chips are returned, all-in **side pots**, split pots with the odd
 chip going left of the button. The evaluator handles kickers, Ace-high (Broadway) and Ace-low
 (wheel) straights, and picks the best 5 of 7. The fuzz test plays hundreds of random 2–6-player
 hands asserting chip conservation, non-negative stacks, exact pot accounting, and that the

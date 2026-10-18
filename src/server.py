@@ -22,14 +22,17 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from table import Table, TableError
 
 MAX_TABLES = 2000                   # shortcut: in-memory store, single process; a DB if scaled
-IDLE_SECONDS = 6 * 3600
+IDLE_SECONDS = 2 * 3600             # only idle tables are evicted; when full of live ones -> 503
+CREATE_LIMIT = (20, 600)            # new tables per client IP per window (count, seconds)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
@@ -54,18 +57,40 @@ class _Entry:
 
 _tables: OrderedDict[str, _Entry] = OrderedDict()
 _store_lock = threading.Lock()
+_creates: dict[str, list[float]] = {}
 
 app = FastAPI(title="poker", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 
+@app.exception_handler(RequestValidationError)
+def _invalid(request: Request, exc: RequestValidationError):
+    # the default handler echoes the input back, and fails (500) on NaN/Infinity
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": [str(x) for x in err.get("loc", ())], "msg": str(err.get("msg", ""))}
+        for err in exc.errors()]})
+
+
 def _evict():
+    """Drop idle tables (oldest first; _tables is kept in last-used order)."""
     now = time.monotonic()
     while _tables:
         tid, ent = next(iter(_tables.items()))
-        if len(_tables) > MAX_TABLES or now - ent.seen > IDLE_SECONDS:
-            del _tables[tid]
-        else:
+        if now - ent.seen <= IDLE_SECONDS:
             break
+        del _tables[tid]
+
+
+def _rate_limited(ip: str) -> bool:
+    count, window = CREATE_LIMIT
+    now = time.monotonic()
+    for k in [k for k, ts in _creates.items() if now - ts[-1] > window]:
+        del _creates[k]                              # forget clients idle past the window
+    ts = [t for t in _creates.get(ip, []) if now - t <= window]
+    if len(ts) >= count:
+        _creates[ip] = ts
+        return True
+    _creates[ip] = ts + [now]
+    return False
 
 
 def _get(tid: str) -> _Entry:
@@ -93,15 +118,21 @@ def health():
 
 
 @app.post("/api/v1/tables")
-def create_table(req: NewTable):
+def create_table(req: NewTable, request: Request):
+    # behind the Cloudflare tunnel every request comes from localhost; CF names the client
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
     try:
         t = Table(players=req.players, stack=req.stack, sb=req.sb, bb=req.bb)
     except TableError as err:
         raise HTTPException(400, str(err))
     tid = secrets.token_urlsafe(16)
     with _store_lock:
-        _tables[tid] = _Entry(t)
+        if _rate_limited(ip):
+            raise HTTPException(429, "too many new tables; try again in a few minutes")
         _evict()
+        if len(_tables) >= MAX_TABLES:
+            raise HTTPException(503, "server is full; try again later")
+        _tables[tid] = _Entry(t)
     return {"id": tid, "state": t.state()}
 
 

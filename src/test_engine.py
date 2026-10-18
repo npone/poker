@@ -188,6 +188,27 @@ def test_short_blind_all_in_no_option_and_uncalled_refund():
     assert [p.stack for p in g.players] == [1, 2]
 
 
+def test_short_all_in_does_not_reopen_raising():
+    # seat0 opens to 10 (a full raise of 8), seat1 calls, BB seat2 shoves 14 total: +4, short of
+    # a full raise. Seat0 and seat1 already acted, so they may only call or fold the extra 4.
+    g = HoldemGame([100, 100, 14], sb=1, bb=2, button=0)
+    seen = {0: [], 1: []}
+    def rec(seat, first):
+        def pol(v):
+            seen[seat].append(v)
+            n = len(seen[seat])
+            if n <= 2:
+                return first if n == 1 else ("allin",)     # facing the short shove: try to re-shove
+            return ("check",) if v["can_check"] else ("call",)
+        return pol
+    g.play_hand([rec(0, ("raise", 10)), rec(1, ("call",)), e.always_allin])
+    for seat in (0, 1):
+        again = seen[seat][1]
+        assert again["to_call"] == 4 and not again["can_raise"], (seat, again)
+    assert sum(p.stack for p in g.players) == 214
+    assert [p.contributed for p in g.players] == [14, 14, 14]     # the re-shoves became calls
+
+
 def test_everyone_folds_to_one():
     g = HoldemGame([100, 100, 100], sb=1, bb=2, button=0)
     r = g.play_hand([e.fold_to_bet, e.fold_to_bet, e.calling_station])

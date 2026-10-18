@@ -53,9 +53,31 @@ def test_health_and_web_client_served():
     assert r.status_code == 200 and "<html" in r.text.lower()
 
 
-def test_eviction_caps_table_count(monkeypatch):
+def test_full_server_refuses_instead_of_evicting_live_tables(monkeypatch):
+    server._tables.clear()
     monkeypatch.setattr(server, "MAX_TABLES", 3)
-    ids = [_new()["id"] for _ in range(5)]
-    assert len(server._tables) <= 3
+    ids = [_new()["id"] for _ in range(3)]
+    assert client.post("/api/v1/tables", json={}).status_code == 503
+    assert all(client.get(f"/api/v1/tables/{t}").status_code == 200 for t in ids)
+    monkeypatch.setattr(server, "IDLE_SECONDS", -1)              # now every table counts as idle
+    assert client.post("/api/v1/tables", json={}).status_code == 200
     assert client.get(f"/api/v1/tables/{ids[0]}").status_code == 404
-    assert client.get(f"/api/v1/tables/{ids[-1]}").status_code == 200
+
+
+def test_new_tables_rate_limited_per_client(monkeypatch):
+    monkeypatch.setattr(server, "CREATE_LIMIT", (2, 600))
+    h = {"cf-connecting-ip": "203.0.113.7"}
+    codes = [client.post("/api/v1/tables", json={}, headers=h).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    other = client.post("/api/v1/tables", json={}, headers={"cf-connecting-ip": "203.0.113.8"})
+    assert other.status_code == 200
+
+
+def test_non_finite_numbers_are_422_not_500():
+    for raw in ('{"players": NaN}', '{"stack": Infinity}', '{"players": 1e400}'):
+        r = client.post("/api/v1/tables", content=raw, headers={"Content-Type": "application/json"})
+        assert r.status_code == 422, (raw, r.status_code)
+    tid = _new()["id"]
+    r = client.post(f"/api/v1/tables/{tid}/act", content='{"action": "raise", "amount": NaN}',
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 422

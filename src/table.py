@@ -134,6 +134,15 @@ class Table:
             self._view = None
             self.result = self._summarize(done.value)
             self._events.append({"type": "result", **self.result})
+        except BaseException:
+            # a bug must not wedge the table: void the hand (everyone gets back what they put
+            # in) so the next deal() still works, then let the error surface
+            for p in self.game.players:
+                p.stack += p.contributed
+                p.contributed = p.street_bet = 0
+            self._hand = None
+            self._view = None
+            raise
 
     def _summarize(self, res: dict) -> dict:
         board = res["board"]
