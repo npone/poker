@@ -17,9 +17,9 @@ engine usable as a backend for a UI, a bot, or tests. Built-in policies are at t
 Cards: rank 2..14 (11=J 12=Q 13=K 14=A), suit 0..3 ('c','d','h','s').
 
 Rules note: standard NLHE — blinds, min-raise = size of the last raise (BB preflop), side pots
-for all-ins, split pots with odd chips going left of the button. Simplification: a short all-in
-(less than a full raise) does not formally reopen re-raising rights, but players still owe the
-extra to call — chip accounting and pot awards are exact.
+for all-ins, split pots with odd chips going left of the button. A short all-in (less than a
+full raise) does not reopen betting: players who already acted may only call or fold it, and
+uncalled chips go back to their owner.
 """
 from __future__ import annotations
 
@@ -215,6 +215,19 @@ class HoldemGame:
     def play_hand(self, policies, order: list[Card] | None = None) -> dict:
         """Play one full hand. `policies[seat]` decides that seat's actions. `order` optionally
         fixes the deal order (for tests). Returns a result dict; stacks are updated in place."""
+        hand = self.hand(order)
+        try:
+            view = next(hand)
+            while True:
+                view = hand.send(policies[view["seat"]](view))
+        except StopIteration as done:
+            return done.value
+
+    def hand(self, order: list[Card] | None = None):
+        """Step-by-step form of play_hand, for callers that cannot block inside a policy (a web
+        or mobile UI). A generator: it yields the acting player's `view` at each decision and
+        takes that player's action back via `send(action)`. When the hand is over it raises
+        StopIteration whose `.value` is the play_hand result dict."""
         alive = self._alive()
         if len(alive) < 2:
             raise ValueError("need >= 2 players with chips")
@@ -247,7 +260,7 @@ class HoldemGame:
         # preflop
         if self.on_street:
             self.on_street("preflop", [])
-        self._betting_round(preflop_first, policies, "preflop")
+        yield from self._betting_round(preflop_first, "preflop")
         # flop / turn / river
         for street, n_cards in (("flop", 3), ("turn", 1), ("river", 1)):
             if len(self._not_folded()) <= 1:
@@ -258,7 +271,7 @@ class HoldemGame:
                 self.on_street(street, list(self.board))
             if len(self._active_bettors()) >= 1 and self._someone_can_bet():
                 self._reset_street()
-                self._betting_round(postflop_first, policies, street)
+                yield from self._betting_round(postflop_first, street)
 
         pots = self._settle()
         return {
@@ -282,7 +295,7 @@ class HoldemGame:
         self.min_raise = self.bb
 
     # -- betting ---------------------------------------------------------------
-    def _betting_round(self, first: int, policies, street: str):
+    def _betting_round(self, first: int, street: str):
         n = self.num
         order = [(first + k) % n for k in range(n)]
         acted: set[int] = set()                      # seats squared with current_bet since last raise
@@ -299,6 +312,8 @@ class HoldemGame:
                 return
             if all(p.seat in acted and p.street_bet == self.current_bet for p in active):
                 return
+            if len(active) == 1 and active[0].street_bet >= self.current_bet:
+                return                                   # nobody left who could answer a bet
             seat = order[i % n]
             i += 1
             p = self.players[seat]
@@ -306,22 +321,25 @@ class HoldemGame:
                 continue
             if p.seat in acted and p.street_bet == self.current_bet:
                 continue
-            action = self._normalize(p, policies[seat], street)
+            view, lg = self._view(p, street, acted)
+            action = self._coerce((yield view), lg, p)
             self._apply(p, action, acted)
 
-    def _legal(self, p: Player) -> dict:
+    def _legal(self, p: Player, acted: set[int] = frozenset()) -> dict:
         to_call = self.current_bet - p.street_bet
         can_check = to_call == 0
         allin_to = p.street_bet + p.stack               # total street bet if shoving
         min_raise_to = self.current_bet + self.min_raise
-        can_raise = p.stack > to_call                   # has chips beyond a call
+        # chips beyond a call, and betting is open to them: a seat that already acted is only
+        # facing more because of a short all-in, which does not reopen the round
+        can_raise = p.stack > to_call and p.seat not in acted
         if min_raise_to > allin_to:                     # can't reach a full raise -> only shove
             min_raise_to = allin_to
         return {"to_call": to_call, "can_check": can_check, "can_raise": can_raise,
                 "min_raise_to": min_raise_to, "allin_to": allin_to}
 
-    def _normalize(self, p: Player, policy, street: str):
-        lg = self._legal(p)
+    def _view(self, p: Player, street: str, acted: set[int] = frozenset()):
+        lg = self._legal(p, acted)
         view = {
             "seat": p.seat, "street": street, "hole": list(p.hole), "board": list(self.board),
             "pot": self.pot_total(), "current_bet": self.current_bet,
@@ -333,8 +351,7 @@ class HoldemGame:
             "contrib": [q.contributed for q in self.players],
             "folded": [q.folded for q in self.players],
         }
-        act = policy(view)
-        return self._coerce(act, lg, p)
+        return view, lg
 
     def _coerce(self, act, lg, p: Player):
         """Force any policy output into a legal action (robust backend; tests pass legal input)."""
@@ -346,7 +363,8 @@ class HoldemGame:
         if kind == "call":
             return ("check",) if lg["can_check"] else ("call",)
         if kind == "allin":
-            return ("raise", lg["allin_to"]) if lg["allin_to"] > self.current_bet else ("call",)
+            return (("raise", lg["allin_to"]) if lg["can_raise"] and lg["allin_to"] > self.current_bet
+                    else ("call",))
         if kind == "raise":
             total = int(act[1])
             if not lg["can_raise"]:
@@ -402,6 +420,13 @@ class HoldemGame:
         return pots
 
     def _settle(self) -> list[dict]:
+        # uncalled chips (the top contributor's excess over the next highest) go back to their
+        # owner; otherwise, if that player folded, the layer would have no one eligible to win it
+        top = max(self.players, key=lambda p: p.contributed)
+        second = max((p.contributed for p in self.players if p is not top), default=0)
+        if top.contributed > second:
+            top.stack += top.contributed - second
+            top.contributed = second
         pots = self._build_pots()
         order_from_button = [(self.button + 1 + k) % self.num for k in range(self.num)]
         results = []
