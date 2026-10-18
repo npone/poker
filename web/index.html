@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hold'em</title>
+<meta name="description" content="No-Limit Texas Hold'em against bots.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+  <header class="bar">
+    <h1>♠ Hold'em</h1>
+    <span id="hand-info" class="muted"></span>
+    <button id="new-game" class="ghost" type="button">New game</button>
+  </header>
+
+  <section id="setup" class="card-panel" hidden>
+    <h2>New table</h2>
+    <form id="setup-form">
+      <label>Players (incl. you)
+        <input name="players" type="number" min="2" max="8" value="4" required></label>
+      <label>Starting stack
+        <input name="stack" type="number" min="10" max="1000000" value="100" required></label>
+      <label>Small blind
+        <input name="sb" type="number" min="1" value="1" required></label>
+      <label>Big blind
+        <input name="bb" type="number" min="1" value="2" required></label>
+      <button type="submit" class="primary">Sit down</button>
+      <p id="setup-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="table-view" hidden>
+    <div id="felt" class="felt">
+      <div class="center">
+        <div id="board" class="board" aria-label="Board"></div>
+        <div id="pot" class="pot"></div>
+        <div id="banner" class="banner" role="status" aria-live="polite"></div>
+      </div>
+      <div id="seats"></div>
+    </div>
+
+    <div id="controls" class="controls">
+      <div id="actions" class="actions" hidden>
+        <button id="btn-fold" class="danger" type="button">Fold <kbd>F</kbd></button>
+        <button id="btn-call" class="primary" type="button">Check <kbd>C</kbd></button>
+        <div id="raise-group" class="raise-group">
+          <input id="raise-range" type="range" aria-label="Raise amount">
+          <input id="raise-amount" type="number" inputmode="numeric" aria-label="Raise to">
+          <div class="presets">
+            <button type="button" data-preset="half">½ pot</button>
+            <button type="button" data-preset="pot">Pot</button>
+            <button type="button" data-preset="max">Max</button>
+          </div>
+          <button id="btn-raise" class="accent" type="button">Raise <kbd>R</kbd></button>
+        </div>
+        <button id="btn-allin" class="accent" type="button">All-in <kbd>A</kbd></button>
+      </div>
+      <div id="between" class="between" hidden>
+        <button id="btn-deal" class="primary" type="button">Deal next hand <kbd>Space</kbd></button>
+      </div>
+      <p id="error" class="error" role="alert"></p>
+    </div>
+
+    <details id="log-box" class="log-box">
+      <summary>Hand log</summary>
+      <ol id="log"></ol>
+    </details>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

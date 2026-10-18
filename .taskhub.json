@@ -1,0 +1,5 @@
+{
+  "commands": {
+    "test": "cd src && \"$HOME/miniconda3/bin/python\" -m pytest -q"
+  }
+}

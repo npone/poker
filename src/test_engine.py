@@ -171,6 +171,44 @@ def test_heads_up_all_in_known_winner():
     g.play_hand([e.always_allin, e.calling_station], order=deck)
     assert [p.stack for p in g.players] == [200, 0]           # AA holds vs KK
 
+def test_short_blind_all_in_no_option_and_uncalled_refund():
+    # heads-up, SB (button) has 1 chip and is all-in posting it. BB must get no option (no one
+    # could answer a bet), and BB's uncalled 1 chip comes back. Crashed in _settle before.
+    g = HoldemGame([1, 100], sb=1, bb=2, button=0)
+    asked = []
+    r = g.play_hand([e.fold_to_bet, lambda v: asked.append(v) or ("fold",)])
+    assert asked == []
+    assert sum(p.stack for p in g.players) == 101
+    assert sum(pot["amount"] for pot in r["pots"]) == 2      # 1 + 1 matched; 1 refunded
+    # and if a player with uncalled chips folds anyway, their excess is refunded, not lost
+    g = HoldemGame([0, 0], button=0)
+    for p, c, f in zip(g.players, [2, 1], [True, False]):
+        p.contributed, p.folded = c, f
+    g._settle()
+    assert [p.stack for p in g.players] == [1, 2]
+
+
+def test_short_all_in_does_not_reopen_raising():
+    # seat0 opens to 10 (a full raise of 8), seat1 calls, BB seat2 shoves 14 total: +4, short of
+    # a full raise. Seat0 and seat1 already acted, so they may only call or fold the extra 4.
+    g = HoldemGame([100, 100, 14], sb=1, bb=2, button=0)
+    seen = {0: [], 1: []}
+    def rec(seat, first):
+        def pol(v):
+            seen[seat].append(v)
+            n = len(seen[seat])
+            if n <= 2:
+                return first if n == 1 else ("allin",)     # facing the short shove: try to re-shove
+            return ("check",) if v["can_check"] else ("call",)
+        return pol
+    g.play_hand([rec(0, ("raise", 10)), rec(1, ("call",)), e.always_allin])
+    for seat in (0, 1):
+        again = seen[seat][1]
+        assert again["to_call"] == 4 and not again["can_raise"], (seat, again)
+    assert sum(p.stack for p in g.players) == 214
+    assert [p.contributed for p in g.players] == [14, 14, 14]     # the re-shoves became calls
+
+
 def test_everyone_folds_to_one():
     g = HoldemGame([100, 100, 100], sb=1, bb=2, button=0)
     r = g.play_hand([e.fold_to_bet, e.fold_to_bet, e.calling_station])
