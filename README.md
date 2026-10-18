@@ -1,13 +1,27 @@
 # poker
 
-A headless **No-Limit Texas Hold'em** backend engine in Python (plus the original ASCII card
-renderer). Pure standard library — no dependencies.
+A **No-Limit Texas Hold'em** game: a headless Python engine, a JSON API over it, and a web
+client — play against bots at https://poker.npone.dev. The engine is pure standard library; the
+server needs FastAPI + uvicorn; the legacy ASCII half needs numpy.
+
+Layers, each usable without the ones above it:
+
+    engine.py   rules: deal, betting, side pots, showdown        (no UI, no I/O)
+    table.py    a session: you vs bots, JSON snapshots + events   (no UI, no I/O)
+    server.py   HTTP JSON API /api/v1 over table.py               (the contract for every client)
+    web/        static web client                                  (no game rules)
+
+The iOS and Android apps will be further clients of the same `/api/v1`.
 
 ## Layout (`src/`)
 
 | File | What it is |
 |------|-----------|
 | `engine.py` | **The backend engine.** Cards/Deck, a correct hand evaluator (with kickers), betting rounds, side pots, showdown, and multi-hand play. |
+| `table.py` | **Game session** for any front end: hero (seat 0) vs bots, `deal()` / `act()` / `state()` returning JSON snapshots with an event log. |
+| `server.py` | **HTTP API** (`/api/v1`, FastAPI) over `table.py`; also serves `web/`. |
+| `bots.py` | Bot policy shared by the CLI and the server. |
+| `test_table.py`, `test_server.py` | Session fuzz (chips, hidden cards, termination) and the HTTP contract. |
 | `test_engine.py` | Regression suite for the engine (evaluator, betting, side pots, showdown, integration, and a randomized fuzz). |
 | `play.py` | **Interactive CLI** — play against the bots in your terminal. |
 | `poker.py` | Headless demo — plays a short game and prints each hand. |
@@ -21,8 +35,31 @@ cd src
 python play.py                          # play against the bots (you + 3 bots)
 python play.py --players 6 --stack 200  # options: --players --stack --sb --bb --seed
 python poker.py                         # watch a bot-vs-bot demo game
-python -m pytest test_engine.py test_evaluator.py test_play.py -q   # all tests
+python -m pytest -q                     # all tests
+uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
 ```
+
+## HTTP API (`/api/v1`)
+
+| | |
+|---|---|
+| `POST /api/v1/tables` `{players, stack, sb, bb}` | new table → `{id, state}` |
+| `GET /api/v1/tables/{id}` | current `state` |
+| `POST /api/v1/tables/{id}/deal` | start the next hand → `state` |
+| `POST /api/v1/tables/{id}/act` `{action, amount?}` | `fold` `check` `call` `raise` (`amount` = total street bet) `allin` → `state` |
+
+`state` is the view from your seat: players (stacks, bets, folded/all-in; other players' hole
+cards only when shown at showdown), board, pot, `to_act` (your legal options, or null), the last
+`result`, and `events` — everything that happened since the previous response, in order. Errors
+are 400 (illegal now), 404 (unknown/expired table) or 422 (malformed). Interactive docs at
+`/api/docs`. Tables live in server memory: a restart ends them.
+
+## Deploy ([private-host])
+
+`sudo bash deploy/install.sh` installs `poker.service` (uvicorn on `127.0.0.1:8094`, low
+priority) and routes `poker.npone.dev` to it through the existing Cloudflare tunnel, rolling the
+tunnel config back if any route stops answering. Take the tunnel lease first (`~/dev/CLAUDE.md`).
+The service runs from this checkout: `sudo systemctl restart poker` after merging to `master`.
 
 At your turn: `k`=check  `c`=call  `f`=fold  `b/r <N>`=bet/raise to N  `a`=all-in  `q`=quit.
 
