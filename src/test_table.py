@@ -99,6 +99,24 @@ def test_bad_table_config_rejected():
             pass
 
 
+def test_bot_crash_voids_hand_without_wedging_table():
+    t = Table(players=3, stack=50, seed=2)
+    def boom(view):
+        raise RuntimeError("bot bug")
+    t.bots = {s: boom for s in t.bots}
+    try:
+        for _ in range(5):                             # the hero may act first; keep going
+            s = t.deal() if not t.in_hand else t.act("call")
+        assert False, "expected the bot error to surface"
+    except RuntimeError:
+        pass
+    assert not t.in_hand
+    assert sum(p["stack"] for p in t.state()["players"]) == 150     # chips returned
+    t.bots = {s: e.calling_station for s in t.bots}
+    s = t.deal()                                                     # table still usable
+    assert s["hand_no"] >= 2
+
+
 def test_events_narrate_the_hand():
     t = Table(players=2, seed=5)
     s = t.deal()

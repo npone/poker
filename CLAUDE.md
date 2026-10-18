@@ -64,7 +64,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 ```bash
 cd /home/nliu/dev/poker/src
 
-# Tests — 37 passed in ~3s  ✅  (also the .taskhub.json `test` command)
+# Tests — 41 passed in ~3s  ✅  (also the .taskhub.json `test` command)
 python -m pytest -q
 
 # Web game locally
@@ -82,8 +82,8 @@ python demo_ascii.py   # legacy: ASCII-rendered deal + score (needs numpy)
 python test.py         # legacy scratch: prints ASCII cards only
 ```
 
-Breakdown of the 37: **20** in `test_engine.py`, **5** in `test_table.py`, **4** each in
-`test_evaluator.py`, `test_play.py`, `test_server.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
+Breakdown of the 41: **21** in `test_engine.py`, **7** in `test_server.py`, **6** in
+`test_table.py`, **4** each in `test_evaluator.py` and `test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
 ASCII cards at import).
 
 **Lint:** no config, no CI, not a project gate. `ruff check .` (ruff 0.15.16 defaults) reports
@@ -164,6 +164,13 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 - `_settle` refunds the top contributor's **uncalled** excess before building pots, and a betting
   round ends when the only player able to bet owes nothing (fixed 2026-10-18: a heads-up SB
   all-in for less than the BB used to give the BB an option, and folding it crashed `_settle`).
+- A **short all-in does not reopen betting**: `_legal(p, acted)` gives a seat that already acted
+  `can_raise False`, and `_coerce` turns its `allin` into a call. (Before 2026-10-18 this was a
+  documented simplification; the review of PR #3 found the UI and bots could raise there.)
+- `table.py` voids a hand (refunds every contribution) if a bot or the engine raises, so a bug
+  cannot wedge a table. `server.py` limits: 2000 live tables (then 503, never evicting a table
+  used in the last 2 h), 20 new tables per client IP per 10 min (`CF-Connecting-IP`), and a
+  422 handler that never echoes input (the default one 500s on NaN/Infinity).
 - Browser check: Playwright does not support Ubuntu 20.04, so run it from the
   `mcr.microsoft.com/playwright/python:v1.55.0-noble` image with `--network host`.
 - **Deployed from this checkout.** `poker.service` runs `src/` in place, so whatever is checked
@@ -177,7 +184,7 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 ## Current state (as of 2026-10-18)
 
 - Stage 1 (web, you vs bots) built on branch `web-game`: step-by-step engine (`hand()`), the
-  uncalled-chip fix, `table.py`, `server.py`, `web/`, `deploy/`, `.taskhub.json`. 37 tests pass.
+  uncalled-chip fix, `table.py`, `server.py`, `web/`, `deploy/`, `.taskhub.json`. 41 tests pass.
   Verified in headless Chromium: desktop, phone 390 px (no horizontal scroll), dark mode, reload
   resumes the table, no console errors.
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence

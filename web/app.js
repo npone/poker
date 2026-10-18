@@ -268,6 +268,7 @@ function preset(kind) {
 async function send(path, body) {
   if (busy) return;
   busy = true;
+  $("new-game").disabled = true;
   $("error").textContent = "";
   $("actions").hidden = true;
   $("between").hidden = true;
@@ -277,8 +278,10 @@ async function send(path, body) {
   } catch (err) {
     if (err.status === 404) { saveId(null); showSetup("That table has expired. Start a new one."); return; }
     $("error").textContent = err.message;
+    try { await replay(await api(`tables/${tid}`)); } catch {}   // resync (e.g. another tab acted)
   } finally {
     busy = false;
+    $("new-game").disabled = false;
     if (cur && !$("table-view").hidden) render();
   }
 }
@@ -314,6 +317,7 @@ function showSetup(msg) {
 
 async function createTable(ev) {
   ev.preventDefault();
+  if (busy) return;
   const f = new FormData(ev.target);
   const body = Object.fromEntries([...f].map(([k, v]) => [k, parseInt(v, 10)]));
   $("setup-error").textContent = "";
@@ -333,7 +337,7 @@ async function createTable(ev) {
 
 // ── wiring ───────────────────────────────────────────────────────────────
 $("setup-form").addEventListener("submit", createTable);
-$("new-game").addEventListener("click", () => showSetup());
+$("new-game").addEventListener("click", () => { if (!busy) showSetup(); });
 $("btn-fold").addEventListener("click", () => act("fold"));
 $("btn-call").addEventListener("click", () => act(cur.to_act.can_check ? "check" : "call"));
 $("btn-allin").addEventListener("click", () => act("allin"));
@@ -369,7 +373,7 @@ document.addEventListener("keydown", (e) => {
     cur = await api(`tables/${tid}`);
     render();
   } catch (err) {
-    saveId(null);
-    showSetup(err.status === 404 ? "" : err.message);
+    if (err.status === 404) { saveId(null); showSetup(); return; }
+    showSetup(`Couldn't load your table (${err.message}). Reload to try again.`);
   }
 })();
