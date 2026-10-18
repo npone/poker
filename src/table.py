@@ -63,13 +63,18 @@ class Table:
         elif kind == "call" and p.stack == 0:
             kind = "allin"
         self._events.append({"type": "action", "seat": p.seat, "action": kind,
-                             "chips": chips, "street_bet": p.street_bet, "stack": p.stack})
+                             "chips": chips, "street_bet": p.street_bet, "stack": p.stack,
+                             "pot": self.game.pot_total()})
 
     def _on_street(self, street, board):
         self.street = street
         self._bet_open = street == "preflop"          # the big blind is the opening bet
+        ps = self.game.players                        # preflop: blinds are already posted
         self._events.append({"type": "street", "street": street,
-                             "board": [_card(c) for c in board]})
+                             "board": [_card(c) for c in board],
+                             "stacks": [p.stack for p in ps],
+                             "bets": [p.street_bet if street == "preflop" else 0 for p in ps],
+                             "pot": self.game.pot_total()})
 
     # -- driving the hand ------------------------------------------------------
     @property
