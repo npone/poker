@@ -342,7 +342,7 @@ function log(text, cls) {
   const li = el("li", cls || "", text);
   $("log").append(li);
   while ($("log").childElementCount > 300) $("log").firstElementChild.remove();
-  li.scrollIntoView({ block: "nearest" });
+  $("log").scrollTop = $("log").scrollHeight;              // not scrollIntoView: that scrolls the page on mobile
 }
 
 const VERB = { fold: "folds", check: "checks", call: "calls", bet: "bets", raise: "raises to", allin: "is all-in" };
