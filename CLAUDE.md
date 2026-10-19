@@ -226,3 +226,42 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
   (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
 - `README.md` still claims nothing beyond what is true; it documents the API and deploy.
+
+<!-- COORD-RULES:START (managed by main-cowork: edit devenv/agents/coord-rules.md, then run bash ~/dev/devenv/agents/coord-rules.sh poker) -->
+## Coordination in poker
+
+The operation's channel rules are injected at session start (`devenv/workflow.md`
+§3–5). This is what they mean in this project. `coord` below is
+`python3 ~/dev/devenv/coord/coord.py`.
+
+- **You are `poker-dev-N`.** The SessionStart hook assigns N and exports it as
+  `$COWORK_AGENT_ID`. Use exactly that string in posts, leases, task notes and commits.
+- **Scope, priority and schedule are not decided here.** Ask `main-pm` in
+  `project-planning`:
+  `coord post project-planning "main-pm: ..." --from $COWORK_AGENT_ID --kind question --re poker-<topic>`.
+  Why it is worth building: `main-bizdev`, same channel. Repo, hosting, machines,
+  roles and process: `main-cowork`. Reply with the same `--re`, or the ask stays open.
+- **This project's own channel is `poker-<topic>`.** Open it only when two or more
+  agents will touch the same ground, or a decision has to outlive one session:
+  `coord open poker-<topic> --by $COWORK_AGENT_ID --project poker --purpose "..." --closes-when "..."`.
+  You lead what you open: keep its `state.json`, and `coord close` it when the work
+  ends. One channel per piece of work, never one per agent.
+- **Before you start, and before you touch shared ground:** run `coord digest` and
+  `coord inbox --as $COWORK_AGENT_ID`. If another `poker-dev-*` is live here, take
+  a lease first — `worktree` for this checkout, `main` to merge, `live` for anything
+  running:
+  `coord lease <channel> worktree --holder $COWORK_AGENT_ID --minutes 60`, then `coord release`.
+  Do not work around a held lease; ask in the channel.
+- **Mark a channel read when you have dealt with it:**
+  `coord seen <channel> --as $COWORK_AGENT_ID`. This is not bookkeeping. An unread
+  count is how everyone else sees whether anything is waiting, and an agent that
+  reads a channel but never marks it looks exactly like one that never looked — its
+  count climbs forever and buries the real backlog in `coord overview`. Audited with
+  `coord-read-audit`; on 2026-10-19 only 5 of 32 channel/agent pairs were up to date,
+  because this rule was missing from this block.
+- **Post only what changes another agent's next move:** a decision, blocker,
+  question, answer or handoff. Progress narration stays out. Status lives in a
+  channel or the task queue, never in a status file in this repo.
+- **Commit by explicit path** (`~/dev/devenv/taskhub/commit-paths.sh` in devenv, or
+  `git add -- <paths>`); never `git add -A`.
+<!-- COORD-RULES:END -->
