@@ -5,6 +5,7 @@
 const API = "api/v1";
 const STORE_KEY = "poker.table";
 const ODDS_KEY = "poker.odds";
+const SOUND_KEY = "poker.sound";           // "0" = muted
 const NEXT_KEY = "poker.next";             // auto-deal countdown, seconds; "0" = deal by hand
 const SUIT = { c: "♣", d: "♦", h: "♥", s: "♠" };
 const DELAY = { think: 340, action: 320, street: 600, chip: 320, showdown: 900 };
@@ -88,9 +89,76 @@ function tween(node, to, fmt = String) {
   requestAnimationFrame(step);
 }
 
+// ── sound: synthesized with Web Audio, no files to load ──────────────────
+const sfx = (() => {
+  let ctx = null, master = null, noiseBuf = null;
+  function ready() {
+    if (!$("sound-toggle").checked || document.hidden) return false;
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.55;
+      master.connect(ctx.destination);
+    }
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    return ctx.state === "running";                   // never queue sounds up to blast out later
+  }
+  const at = (ms) => ctx.currentTime + Math.max(0, ms) / 1000;
+  function env(t, peak, attack, decay) {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+    g.connect(master);
+    return g;
+  }
+  function burst(t, freq, q, peak, decay) {         // filtered noise: card slides, snaps, clacks
+    if (!noiseBuf) {
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate / 2, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter();
+    src.buffer = noiseBuf;
+    f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q;
+    src.connect(f); f.connect(env(t, peak, 0.003, decay));
+    src.start(t, Math.random() * 0.3); src.stop(t + decay + 0.05);
+  }
+  function tone(t, freq, type, peak, decay) {
+    const o = ctx.createOscillator();
+    o.type = type; o.frequency.value = freq;
+    o.connect(env(t, peak, 0.005, decay));
+    o.start(t); o.stop(t + decay + 0.05);
+  }
+  return {
+    card(ms) { if (!ready()) return; const t = at(ms); burst(t, 2600 + Math.random() * 800, 0.8, 0.5, 0.07); burst(t + 0.02, 5200, 1.5, 0.15, 0.04); },
+    flip(ms) { if (!ready()) return; const t = at(ms); burst(t, 1800, 1.2, 0.45, 0.05); burst(t + 0.045, 3200, 1.2, 0.3, 0.05); },
+    muck() { if (!ready()) return; burst(at(0), 1200, 0.6, 0.35, 0.18); },
+    knock() { if (!ready()) return; const t = at(0); for (const d of [0, 0.12]) { tone(t + d, 140, "sine", 0.5, 0.09); burst(t + d, 600, 1, 0.25, 0.04); } },
+    chips(ms, n = 3) {
+      if (!ready()) return;
+      const t = at(ms);
+      for (let i = 0; i < n; i++) {
+        const ti = t + i * 0.035 + Math.random() * 0.015, f = 3800 + Math.random() * 1600;
+        tone(ti, f, "sine", 0.12, 0.05); tone(ti, f * 1.48, "sine", 0.05, 0.035); burst(ti, 6000, 2, 0.12, 0.02);
+      }
+    },
+    win(big) {
+      if (!ready()) return;
+      const t = at(0), notes = big ? [523.25, 659.25, 783.99, 1046.5, 1318.5] : [659.25, 987.77];
+      notes.forEach((f, i) => { tone(t + i * 0.11, f, "triangle", big ? 0.28 : 0.18, big ? 0.9 : 0.6); tone(t + i * 0.11, f * 2, "sine", 0.06, 0.4); });
+    },
+    unlock() { if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {}); },
+  };
+})();
+
 // a stack of chips sliding across the felt
 function fly(from, to, amount, { duration = DELAY.chip, delay = 0 } = {}) {
-  if (!from || !to || reduced()) return Promise.resolve();
+  if (!from || !to) return Promise.resolve();
+  sfx.chips(delay + (reduced() ? 0 : duration * 0.85), amount >= 20 ? 5 : 3);   // the landing clink
+  if (reduced()) return Promise.resolve();
   const a = center(from), b = center(to);
   const chip = el("div", "fly-chip");
   chip.append(el("i"), el("i"), el("i"));
@@ -141,6 +209,7 @@ function setCards(box, codes, mode) {
   box.dataset.key = key;
   if (!codes.length) {
     const kids = [...box.children];
+    if (kids.length) sfx.muck();
     if (!kids.length || reduced()) { box.replaceChildren(); return; }
     const { dx, dy } = toFeltCenter(box);
     kids.forEach((k) => k.animate([{ transform: "none", opacity: 1 },
@@ -150,22 +219,29 @@ function setCards(box, codes, mode) {
     return;
   }
   box.replaceChildren(...codes.map(cardFace));
-  if (reduced()) return;
+  const still = reduced();
   let n = 0;
   [...box.children].forEach((c, i) => {
     const was = old[i], now = codes[i] || "x";
     if (was === now) return;
     if (was === "x") {                                          // reveal
-      c.animate([{ transform: "rotateY(90deg)", filter: "brightness(.6)" }, { transform: "none" }],
-        { duration: 340, delay: i * 120, easing: "cubic-bezier(.2,.8,.3,1)", fill: "backwards" });
+      const delay = i * 120;
+      sfx.flip(still ? 0 : delay);
+      if (!still) c.animate([{ transform: "rotateY(90deg)", filter: "brightness(.6)" }, { transform: "none" }],
+        { duration: 340, delay, easing: "cubic-bezier(.2,.8,.3,1)", fill: "backwards" });
     } else if (mode === "board") {
-      c.animate([{ transform: "translateY(-26px) rotateY(100deg) scale(.8)", opacity: 0 }, { transform: "none", opacity: 1 }],
-        { duration: 420, delay: n++ * 140, easing: "cubic-bezier(.2,.8,.3,1)", fill: "backwards" });
+      const delay = n++ * 140;
+      sfx.card(still ? 0 : delay);
+      if (!still) c.animate([{ transform: "translateY(-26px) rotateY(100deg) scale(.8)", opacity: 0 }, { transform: "none", opacity: 1 }],
+        { duration: 420, delay, easing: "cubic-bezier(.2,.8,.3,1)", fill: "backwards" });
     } else {
+      const delay = (mode.order || 0) * 70 + i * 260;
+      sfx.card(still ? 0 : delay);
+      if (still) return;
       const { dx, dy } = toFeltCenter(c);
       c.animate([{ transform: `translate(${dx}px, ${dy}px) rotate(-25deg) scale(.45)`, opacity: 0 },
         { transform: "none", opacity: 1 }],
-        { duration: 460, delay: (mode.order || 0) * 70 + i * 260, easing: "cubic-bezier(.2,.8,.25,1)", fill: "backwards" });
+        { duration: 460, delay, easing: "cubic-bezier(.2,.8,.25,1)", fill: "backwards" });
     }
   });
 }
@@ -401,6 +477,8 @@ async function replay(state) {
       }
       disp.stacks[ev.seat] = ev.stack; disp.bets[ev.seat] = ev.street_bet; disp.pot = ev.pot;
       if (ev.action === "fold") disp.folded[ev.seat] = true;
+      if (ev.action === "check") sfx.knock();
+      else if (ev.action === "fold" && !bot) sfx.muck();          // a bot's muck sounds as its cards leave
       said[ev.seat] = describe(ev, true);
       lastActor = ev.seat;
       log(describe(ev));
@@ -433,6 +511,7 @@ async function replay(state) {
       const text = resultText(ev);
       log(text, "win");
       showWinner(ev, state);
+      sfx.win(winners.includes(state.hero));
     }
   }
   disp = null;
@@ -690,6 +769,10 @@ $("raise-amount").addEventListener("input", (e) => { $("raise-range").value = e.
 $("raise-amount").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); raise(); } });
 document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => preset(b.dataset.preset)));
 $("odds-toggle").checked = load(ODDS_KEY) === "1";
+$("sound-toggle").checked = load(SOUND_KEY) !== "0";
+$("sound-toggle").addEventListener("change", (e) => { save(SOUND_KEY, e.target.checked ? null : "0"); if (e.target.checked) sfx.chips(0); });
+addEventListener("pointerdown", sfx.unlock);           // browsers start audio only after a gesture
+addEventListener("keydown", sfx.unlock);
 $("next-secs").value = [...$("next-secs").options].some((o) => o.value === load(NEXT_KEY)) ? load(NEXT_KEY) : "4";
 $("next-secs").addEventListener("change", (e) => {
   save(NEXT_KEY, e.target.value);
@@ -703,6 +786,7 @@ document.addEventListener("keydown", (e) => {
   if ($("table-view").hidden) return;
   const k = e.key.toLowerCase();
   if (k === "o") { $("odds-toggle").click(); return; }
+  if (k === "m") { $("sound-toggle").click(); return; }
   if (busy) return;
   if (cur.to_act) {
     if (k === "f") act("fold");
