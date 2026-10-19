@@ -7,7 +7,8 @@ const STORE_KEY = "poker.table";
 const ODDS_KEY = "poker.odds";
 const SUIT = { c: "♣", d: "♦", h: "♥", s: "♠" };
 const DELAY = { think: 340, action: 320, street: 600, chip: 320, showdown: 900, next: 4000 };
-const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const motionQuery = matchMedia("(prefers-reduced-motion: reduce)");
+const reduced = () => motionQuery.matches;
 
 const $ = (id) => document.getElementById(id);
 let tid = null;          // table id: the only credential for our seat
@@ -25,11 +26,17 @@ function save(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.remove
 
 // ── server ───────────────────────────────────────────────────────────────
 async function api(path, body) {
-  const res = await fetch(`${API}/${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(`${API}/${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),          // a hung request must not freeze the table
+    });
+  } catch (err) {
+    throw new Error(err.name === "TimeoutError" ? "The server took too long to answer." : "Network error.");
+  }
   let data = null;
   try { data = await res.json(); } catch {}
   if (!res.ok) {
@@ -49,7 +56,7 @@ function el(tag, cls, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, reduceMotion ? Math.min(ms, 120) : ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, reduced() ? Math.min(ms, 120) : ms));
 function cardText(code) { return (code[0] === "T" ? "10" : code[0]) + SUIT[code[1]]; }
 function name(seat) { return seat === cur.hero ? "You" : cur.players[seat].name; }
 const pct = (x) => (x * 100).toFixed(x > 0 && x < 0.1 ? 1 : 0) + "%";
@@ -67,7 +74,7 @@ function toFeltCenter(elm) {
 function tween(node, to, fmt = String) {
   const from = node._v ?? to;
   node._v = to;
-  if (from === to || reduceMotion) { node.textContent = fmt(to); return; }
+  if (from === to || reduced()) { node.textContent = fmt(to); return; }
   const t0 = performance.now(), dur = 420;
   const step = (t) => {
     const k = Math.min(1, (t - t0) / dur), e = 1 - (1 - k) ** 3;
@@ -80,7 +87,7 @@ function tween(node, to, fmt = String) {
 
 // a stack of chips sliding across the felt
 function fly(from, to, amount, { duration = DELAY.chip, delay = 0 } = {}) {
-  if (!from || !to || reduceMotion) return Promise.resolve();
+  if (!from || !to || reduced()) return Promise.resolve();
   const a = center(from), b = center(to);
   const chip = el("div", "fly-chip");
   chip.append(el("i"), el("i"), el("i"));
@@ -107,7 +114,7 @@ function floatText(target, text, cls) {
     { transform: "translate(-50%, -20%) scale(.6)", opacity: 0 },
     { transform: "translate(-50%, -90%) scale(1.15)", opacity: 1, offset: 0.25 },
     { transform: "translate(-50%, -190%) scale(1)", opacity: 0 },
-  ], { duration: reduceMotion ? 1 : 1800, easing: "ease-out", fill: "both" });
+  ], { duration: reduced() ? 1 : 1800, easing: "ease-out", fill: "both" });
   anim.finished.catch(() => {}).then(() => f.remove());
 }
 
@@ -131,7 +138,7 @@ function setCards(box, codes, mode) {
   box.dataset.key = key;
   if (!codes.length) {
     const kids = [...box.children];
-    if (!kids.length || reduceMotion) { box.replaceChildren(); return; }
+    if (!kids.length || reduced()) { box.replaceChildren(); return; }
     const { dx, dy } = toFeltCenter(box);
     kids.forEach((k) => k.animate([{ transform: "none", opacity: 1 },
       { transform: `translate(${dx * 0.6}px, ${dy * 0.6}px) rotate(35deg) scale(.5)`, opacity: 0 }],
@@ -140,7 +147,7 @@ function setCards(box, codes, mode) {
     return;
   }
   box.replaceChildren(...codes.map(cardFace));
-  if (reduceMotion) return;
+  if (reduced()) return;
   let n = 0;
   [...box.children].forEach((c, i) => {
     const was = old[i], now = codes[i] || "x";
@@ -246,6 +253,7 @@ function updateCenter(board, pot) {
 function log(text, cls) {
   const li = el("li", cls || "", text);
   $("log").append(li);
+  while ($("log").childElementCount > 300) $("log").firstElementChild.remove();
   li.scrollIntoView({ block: "nearest" });
 }
 
@@ -511,17 +519,16 @@ async function renderOdds() {
 }
 
 function drawOdds(o) {
+  if (busy) return;
   const body = $("odds-body");
   const need = o.pot_odds, eq = o.equity;
-  const fair = 1 / (o.opponents + 1);
-  const ev = eq * (o.pot + o.to_call) - o.to_call;
   const row = (label, value, cls) => {
     const r = el("div", "orow " + (cls || ""));
     r.append(el("span", "olabel", label), el("b", "", value));
     return r;
   };
   const gauge = el("div", "gauge");
-  const fill = el("div", "fill " + (o.to_call ? (eq >= need ? "good" : "bad") : "good"));
+  const fill = el("div", "fill " + (o.verdict === "call_minus_ev" ? "bad" : "good"));
   fill.style.width = pct(eq);
   gauge.append(fill);
   if (o.to_call) {
@@ -530,27 +537,20 @@ function drawOdds(o) {
     mark.title = "break-even equity";
     gauge.append(mark);
   }
-  const kids = [];
-  if (o.to_call) {
-    kids.push(row(`Call ${o.to_call} to win ${o.pot}`, `need ${pct(need)}`));
-  } else {
-    kids.push(row("Nothing to call", "free to check"));
-  }
+  const kids = [o.to_call ? row(`Call ${o.to_call} to win ${o.pot}`, `need ${pct(need)}`)
+                          : row("Nothing to call", "free to check")];
   kids.push(row(`Your equity vs ${o.opponents} opponent${o.opponents === 1 ? "" : "s"}`, pct(eq)), gauge);
-  let verdict;
-  if (!o.to_call) {
-    verdict = eq > fair * 1.4 ? ["good", `Ahead of your fair share (${pct(fair)}): bet for value.`]
-      : ["", `Fair share is ${pct(fair)}. Check, or bluff sparingly.`];
-  } else if (eq >= need) {
-    verdict = ["good", `Calling is +EV: about +${ev.toFixed(1)} chips a call.`];
-  } else {
-    verdict = ["bad", `Calling is −EV: about ${ev.toFixed(1)} chips a call. Fold, unless you plan to bluff.`];
-  }
+  const ev = Math.abs(o.ev).toFixed(1);
+  const verdict = {
+    call_plus_ev: ["good", `Calling is +EV: about +${ev} chips a call.`],
+    call_minus_ev: ["bad", `Calling is −EV: about −${ev} chips a call. Fold, unless you plan to bluff.`],
+    value_bet: ["good", `Ahead of your fair share (${pct(o.fair_share)}): bet for value.`],
+    check: ["", `Fair share is ${pct(o.fair_share)}. Check, or bluff sparingly.`],
+  }[o.verdict];
   kids.push(el("p", "verdict " + verdict[0], verdict[1]));
   if (o.made) kids.push(row("You have", o.made));
   if (o.outs.length) {
-    const hit = Math.min(1, o.outs.length * (o.street === "flop" ? 4 : 2) / 100);
-    kids.push(row(`${o.outs.length} outs`, `≈${pct(hit)} by the river`));
+    kids.push(row(`${o.outs.length} outs`, `≈${pct(o.hit_by_river)} by the river`));
     const list = el("div", "outs");
     list.append(...o.outs.map((c) => el("span", "mini" + (c[1] === "h" || c[1] === "d" ? " red" : ""), cardText(c))));
     kids.push(list);
@@ -563,17 +563,22 @@ function drawOdds(o) {
   sizingHint();
 }
 
-// how good a hand a caller needs against the bet currently on the slider
+// how good a hand a caller needs against the raise on the slider (the server does the maths)
+let sizeTimer = null;
 function sizingHint() {
+  clearTimeout(sizeTimer);
   const out = $("odds-size");
   const s = cur, a = s && s.to_act;
-  if (!out || !a || $("raise-group").hidden) { if (out) out.textContent = ""; return; }
-  const me = s.players[s.hero];
+  if (!out || !a || !oddsOn() || $("raise-group").hidden) { if (out) out.textContent = ""; return; }
   const to = parseInt($("raise-amount").value, 10);
-  if (!Number.isFinite(to)) return;
-  const potAfter = s.pot + (to - me.street_bet);
-  const theirCall = to - (me.street_bet + a.to_call);
-  out.textContent = `Raising to ${to}: a caller needs ${pct(theirCall / (potAfter + theirCall))} equity.`;
+  if (!Number.isFinite(to) || to < a.min_raise_to || to > a.allin_to) { out.textContent = ""; return; }
+  sizeTimer = setTimeout(async () => {
+    if (busy || cur !== s) return;
+    try {
+      const o = await api(`tables/${tid}/odds?raise_to=${to}`);
+      if (cur === s && !busy && $("odds-size")) $("odds-size").textContent = `Raising to ${to}: a caller needs ${pct(o.caller_needs)} equity.`;
+    } catch {}
+  }, 180);
 }
 
 // ── actions ──────────────────────────────────────────────────────────────
@@ -581,6 +586,7 @@ async function send(path, body) {
   if (busy) return;
   busy = true;
   cancelNext();
+  clearTimeout(sizeTimer);
   $("new-game").disabled = true;
   $("error").textContent = "";
   $("actions").hidden = true;

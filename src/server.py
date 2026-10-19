@@ -8,7 +8,7 @@ same /api/v1 endpoints the web client does.
     GET  /api/v1/tables/{id}                                      -> state
     POST /api/v1/tables/{id}/deal                                 -> state
     POST /api/v1/tables/{id}/act        {action, amount?}         -> state
-    GET  /api/v1/tables/{id}/odds       hero's pot odds, equity, outs (only on hero's turn)
+    GET  /api/v1/tables/{id}/odds[?raise_to=N]  hero's pot odds, equity, EV, outs (hero's turn)
     GET  /api/v1/health
 
 `state` is Table.state(); its `events` list holds what happened since the previous response.
@@ -23,7 +23,7 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -153,8 +153,8 @@ def act(tid: str, req: Action):
 
 
 @app.get("/api/v1/tables/{tid}/odds")
-def table_odds(tid: str):
-    return _call(tid, lambda t: t.odds())
+def table_odds(tid: str, raise_to: int | None = Query(None, ge=0, le=10_000_000)):
+    return _call(tid, lambda t: t.odds(raise_to))
 
 
 if WEB_DIR.is_dir():

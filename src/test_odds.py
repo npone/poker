@@ -63,5 +63,15 @@ def test_table_odds_only_on_hero_turn():
         s = t.deal()
     o = t.odds(sims=200)
     assert 0 <= o["equity"] <= 1 and o["opponents"] >= 1
+    assert t.odds() == o                                        # cached for this decision
+    assert o["verdict"] in ("call_plus_ev", "call_minus_ev", "value_bet", "check")
+    a = s["to_act"]
+    if a["can_raise"]:
+        r = t.odds(raise_to=a["allin_to"])
+        assert 0 < r["caller_needs"] < 0.5 and r["equity"] == o["equity"]
+        try:
+            t.odds(raise_to=a["allin_to"] + 1); assert False
+        except TableError:
+            pass
     assert o["pot_odds"] == round(odds.pot_odds(o["to_call"], o["pot"]), 4)
     assert all(p["style"] for p in s["players"][1:]) and s["players"][0]["style"] is None
