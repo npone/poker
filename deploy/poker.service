@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 User=nliu
 WorkingDirectory=/home/nliu/dev/poker/src
+# data root, outside the checkout (npone-site/PORTABILITY.md)
+Environment=POKER_DB=/srv/npone/poker/poker.db
 ExecStart=/home/nliu/miniconda3/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8094 --no-access-log
 Restart=always
 RestartSec=5
@@ -17,7 +19,7 @@ MemoryLimit=512M
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/nliu/dev/poker/data
+ReadWritePaths=/srv/npone/poker
 PrivateTmp=true
 
 [Install]
