@@ -57,6 +57,10 @@ def test_odds_endpoint():
     assert {"pot_odds", "equity", "outs", "opponents", "to_call"} <= set(o)
 
 
+def test_web_files_revalidate():
+    assert client.get("/app.js").headers["cache-control"] == "no-cache"
+
+
 def test_health_and_web_client_served():
     assert client.get("/api/v1/health").json()["ok"]
     r = client.get("/")
