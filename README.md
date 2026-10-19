@@ -20,7 +20,9 @@ The iOS and Android apps will be further clients of the same `/api/v1`.
 | `engine.py` | **The backend engine.** Cards/Deck, a correct hand evaluator (with kickers), betting rounds, side pots, showdown, and multi-hand play. |
 | `table.py` | **Game session** for any front end: hero (seat 0) vs bots, `deal()` / `act()` / `state()` returning JSON snapshots with an event log. |
 | `server.py` | **HTTP API** (`/api/v1`, FastAPI) over `table.py`; also serves `web/`. |
-| `bots.py` | Bot policy shared by the CLI and the server. |
+| `bots.py` | Equity bots shared by the CLI and the server: Monte Carlo win chance vs pot odds and stack at risk, with a random per-bot risk tolerance (shown as Rock / Steady / Loose / Maniac). |
+| `odds.py` | Hand-strength math: fast 7-card evaluator (pinned equal to the engine's), Monte Carlo equity, outs, pot odds. Used by the bots and the odds endpoint. |
+| `test_odds.py` | Evaluator equivalence, known equities, outs, risk tolerance changing play, the odds endpoint. |
 | `test_table.py`, `test_server.py` | Session fuzz (chips, hidden cards, termination) and the HTTP contract. |
 | `test_engine.py` | Regression suite for the engine (evaluator, betting, side pots, showdown, integration, and a randomized fuzz). |
 | `play.py` | **Interactive CLI** — play against the bots in your terminal. |
@@ -47,8 +49,9 @@ uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
 | `GET /api/v1/tables/{id}` | current `state` |
 | `POST /api/v1/tables/{id}/deal` | start the next hand → `state` |
 | `POST /api/v1/tables/{id}/act` `{action, amount?}` | `fold` `check` `call` `raise` (`amount` = total street bet) `allin` → `state` |
+| `GET /api/v1/tables/{id}/odds` | on your turn only: `pot_odds`, `equity` (vs the hands still in), `opponents`, `made`, `outs` — the odds helper's numbers |
 
-`state` is the view from your seat: players (stacks, bets, folded/all-in; other players' hole
+`state` is the view from your seat: players (stacks, bets, folded/all-in, each bot's `style`; other players' hole
 cards only when shown at showdown), board, pot, `to_act` (your legal options, or null), the last
 `result`, and `events` — everything that happened since the previous response, in order. Errors
 are 400 (illegal now), 404 (unknown/expired table), 422 (malformed), 429 (too many new tables
