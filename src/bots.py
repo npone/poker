@@ -7,10 +7,6 @@ BOT_NAMES = ["Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Heidi"]
 SIMS = 250                       # Monte Carlo showdowns per decision (~10 ms per opponent)
 
 
-def style(risk: float) -> str:
-    return ("Rock", "Steady", "Loose", "Maniac")[min(3, int(risk * 4))]
-
-
 def make_bot(seed: int, risk: float | None = None):
     """An equity bot. Each decision it estimates its chance to win against the hands still in
     (Monte Carlo vs random holdings, discounted when facing a big bet, since bettors are rarely

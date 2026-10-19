@@ -18,7 +18,7 @@ import random
 
 import engine as e
 import odds
-from bots import BOT_NAMES, make_bot, style
+from bots import BOT_NAMES, make_bot
 
 HERO = 0
 ACTIONS = ("fold", "check", "call", "raise", "allin")
@@ -43,7 +43,6 @@ class Table:
         self.names = ["You"] + BOT_NAMES[: players - 1]
         self.game = e.HoldemGame([stack] * players, sb=sb, bb=bb, button=0, rng=rng)
         self.bots = {s: make_bot(rng.randrange(1 << 30)) for s in range(1, players)}
-        self.styles = {s: style(b.risk) for s, b in self.bots.items()}    # random risk tolerance
         self.hand_no = 0
         self.street = None
         self._bet_open = False
@@ -220,7 +219,6 @@ class Table:
                 "folded": p.folded, "allin": p.allin,
                 "out": p.stack == 0 and (not self.in_hand or not p.hole),
                 "in_hand": bool(p.hole), "hole": hole,
-                "style": self.styles.get(p.seat),
             })
         to_act = None
         if self._view:

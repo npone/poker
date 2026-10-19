@@ -48,7 +48,6 @@ def test_risk_tolerance_changes_play():
     def calls(risk):
         return sum(bots.make_bot(s, risk)(view)[0] != "fold" for s in range(40))
     assert calls(0.0) < calls(1.0)
-    assert bots.style(0.0) == "Rock" and bots.style(0.99) == "Maniac"
     assert 0 <= bots.make_bot(5).risk <= 1
 
 
@@ -74,4 +73,4 @@ def test_table_odds_only_on_hero_turn():
         except TableError:
             pass
     assert o["pot_odds"] == round(odds.pot_odds(o["to_call"], o["pot"]), 4)
-    assert all(p["style"] for p in s["players"][1:]) and s["players"][0]["style"] is None
+    assert all("style" not in p and "risk" not in p for p in s["players"])   # play style is hidden

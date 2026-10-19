@@ -6,7 +6,7 @@
 <title>Hold'em</title>
 <meta name="description" content="No-Limit Texas Hold'em against bots.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <main id="app">
@@ -16,6 +16,12 @@
     <label class="switch" title="Show pot odds and your equity on your turn (O)">
       <input id="odds-toggle" type="checkbox"><span class="track" aria-hidden="true"></span>Odds helper
     </label>
+    <label class="setting" title="Pause between hands before the next one deals itself">Next hand
+      <select id="next-secs">
+        <option value="2">after 2 s</option><option value="4">after 4 s</option>
+        <option value="7">after 7 s</option><option value="12">after 12 s</option>
+        <option value="0">when I click</option>
+      </select></label>
     <button id="new-game" class="ghost" type="button">New game</button>
   </header>
 
@@ -37,6 +43,7 @@
 
   <section id="table-view" hidden>
     <div class="table-wrap">
+     <div class="main-col">
       <div id="felt" class="felt">
         <div class="center">
           <div id="board" class="board" aria-label="Board"></div>
@@ -64,12 +71,6 @@
         </div>
       </div>
 
-      <aside id="odds" class="odds-panel" hidden aria-live="polite">
-        <h3>Odds helper</h3>
-        <div id="odds-body"></div>
-      </aside>
-    </div>
-
     <div id="controls" class="controls">
       <div id="actions" class="actions" hidden>
         <button id="btn-fold" class="danger" type="button">Fold <kbd>F</kbd></button>
@@ -91,13 +92,22 @@
       </div>
       <p id="error" class="error" role="alert"></p>
     </div>
+     </div>
 
-    <details id="log-box" class="log-box">
-      <summary>Hand log</summary>
-      <ol id="log"></ol>
-    </details>
+     <!-- fixed side column: the table never moves when the odds helper turns on or off -->
+     <div class="side">
+      <aside id="odds" class="odds-panel" hidden aria-live="polite">
+        <h3>Odds helper</h3>
+        <div id="odds-body"></div>
+      </aside>
+      <details id="log-box" class="log-box" open>
+        <summary>Hand log</summary>
+        <ol id="log"></ol>
+      </details>
+     </div>
+    </div>
   </section>
 </main>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
