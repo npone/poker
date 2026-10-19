@@ -1,7 +1,7 @@
 :root {
   --bg: #f1eee7;
   --fg: #1d1f1e;
-  --muted: #6b6f6c;
+  --muted: #5e625f;   /* 4.5:1+ on --bg (was #6b6f6c, 4.40:1) */
   --panel: #ffffff;
   --line: #d9d6cf;
   --felt: #1d6a43;
@@ -15,6 +15,7 @@
   --red: #c4302b;
   --primary: #1f7a4d;
   --accent: #c0841f;
+  --accent-ink: #8a5a0c;   /* the accent as small text on the light page: 5:1 (the accent itself is 2.8:1) */
   --danger: #a2322e;
   --neutral: #e9e6df;
   --neutral-ink: #1d1f1e;
@@ -30,14 +31,14 @@
   :root:not([data-theme="light"]) {
     --bg: #101413; --fg: #e8ebe9; --muted: #98a19c; --panel: #1b201e; --line: #2c3431;
     --felt: #165638; --felt-hi: #22764c; --wood: #4a2d17; --wood-hi: #6e4826; --wood-lo: #24140a;
-    --neutral: #2a302d; --neutral-ink: #e8ebe9; --primary: #23905a;
+    --neutral: #2a302d; --neutral-ink: #e8ebe9; --primary: #23905a; --accent-ink: var(--accent);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #101413; --fg: #e8ebe9; --muted: #98a19c; --panel: #1b201e; --line: #2c3431;
   --felt: #165638; --felt-hi: #22764c; --wood: #4a2d17; --wood-hi: #6e4826; --wood-lo: #24140a;
-  --neutral: #2a302d; --neutral-ink: #e8ebe9; --primary: #23905a;
+  --neutral: #2a302d; --neutral-ink: #e8ebe9; --primary: #23905a; --accent-ink: var(--accent);
   color-scheme: dark;
 }
 
@@ -87,7 +88,7 @@ kbd { font: 11px ui-monospace, monospace; opacity: .65; margin-left: 4px; }
   -webkit-background-clip: text; background-clip: text; color: transparent;
   padding-right: .1em;              /* italic overhang */
 }
-.tag { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); line-height: 1.2; }
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); line-height: 1.2; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .word { background-image: linear-gradient(180deg, #fff6d0, var(--gold) 60%, #c8901c); }
 }
@@ -120,7 +121,7 @@ button:active:not(:disabled) {
 button:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 button.primary { --b: var(--primary); --ink: #fff; }
-button.accent { --b: var(--accent); --ink: #fff; }
+button.accent { --b: color-mix(in srgb, var(--accent), #000 12%); --ink: #fff; }   /* white text 4.5:1+ (was 4.47) */
 button.danger { --b: var(--danger); --ink: #fff; }
 button.ghost { --b: transparent; background: transparent; box-shadow: none; border-color: var(--line); text-shadow: none; }
 button.small { min-height: 34px; padding: 5px 12px; font-size: 13px; border-radius: 10px; }
