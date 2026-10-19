@@ -17,7 +17,8 @@ from __future__ import annotations
 import random
 
 import engine as e
-from bots import BOT_NAMES, make_bot
+import odds
+from bots import BOT_NAMES, make_bot, style
 
 HERO = 0
 ACTIONS = ("fold", "check", "call", "raise", "allin")
@@ -42,6 +43,7 @@ class Table:
         self.names = ["You"] + BOT_NAMES[: players - 1]
         self.game = e.HoldemGame([stack] * players, sb=sb, bb=bb, button=0, rng=rng)
         self.bots = {s: make_bot(rng.randrange(1 << 30)) for s in range(1, players)}
+        self.styles = {s: style(b.risk) for s, b in self.bots.items()}    # random risk tolerance
         self.hand_no = 0
         self.street = None
         self._bet_open = False
@@ -161,6 +163,22 @@ class Table:
         return {"showdown": showdown, "shown": shown, "pots": pots,
                 "net": [a - b for a, b in zip(res["stacks"], res["stacks_before"])]}
 
+    def odds(self, sims: int = 2000) -> dict:
+        """The hero's numbers for the decision in front of them: pot odds (the equity a call
+        needs), equity against the hands still in, and outs. Read-only: no events consumed."""
+        if self._view is None:
+            raise TableError("not your turn")
+        v = self._view
+        hole, board = v["hole"], v["board"]
+        opp = sum(not f for f in v["folded"]) - 1
+        outs = odds.outs(hole, board)
+        return {"hand_no": self.hand_no, "street": v["street"], "to_call": v["to_call"],
+                "pot": v["pot"], "opponents": opp,
+                "pot_odds": round(odds.pot_odds(v["to_call"], v["pot"]), 4),
+                "equity": round(odds.equity(hole, board, opp, sims), 4),
+                "made": e.hand_name(e.evaluate(hole + board)) if board else None,
+                "outs": [_card(c) for c in outs]}
+
     # -- snapshot --------------------------------------------------------------
     def state(self) -> dict:
         g = self.game
@@ -177,6 +195,7 @@ class Table:
                 "folded": p.folded, "allin": p.allin,
                 "out": p.stack == 0 and (not self.in_hand or not p.hole),
                 "in_hand": bool(p.hole), "hole": hole,
+                "style": self.styles.get(p.seat),
             })
         to_act = None
         if self._view:

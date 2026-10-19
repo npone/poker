@@ -13,6 +13,9 @@
   <header class="bar">
     <h1>♠ Hold'em</h1>
     <span id="hand-info" class="muted"></span>
+    <label class="switch" title="Show pot odds and your equity on your turn (O)">
+      <input id="odds-toggle" type="checkbox"><span class="track" aria-hidden="true"></span>Odds helper
+    </label>
     <button id="new-game" class="ghost" type="button">New game</button>
   </header>
 
@@ -33,13 +36,38 @@
   </section>
 
   <section id="table-view" hidden>
-    <div id="felt" class="felt">
-      <div class="center">
-        <div id="board" class="board" aria-label="Board"></div>
-        <div id="pot" class="pot"></div>
-        <div id="banner" class="banner" role="status" aria-live="polite"></div>
+    <div class="table-wrap">
+      <div id="felt" class="felt">
+        <div class="center">
+          <div id="board" class="board" aria-label="Board"></div>
+          <div id="pot" class="pot"><span class="chip-ico" aria-hidden="true"></span><span id="pot-amt"></span></div>
+        </div>
+        <div id="bets"></div>
+        <div id="dealer" class="dealer" hidden>D</div>
+        <div id="seats"></div>
+        <div id="fx" class="fx" aria-hidden="true"></div>
+        <div id="winner" class="winner-overlay" role="status" aria-live="polite" hidden>
+          <div class="win-card">
+            <div id="win-title" class="win-title"></div>
+            <ol id="win-pots" class="win-pots"></ol>
+            <div id="win-net" class="win-net"></div>
+            <div id="next" class="next">
+              <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+                <circle cx="18" cy="18" r="16" class="ring-bg"/><circle id="next-ring" cx="18" cy="18" r="16" class="ring-fg"/>
+              </svg>
+              <span id="next-label">Next hand…</span>
+              <button id="btn-now" class="primary small" type="button">Deal now</button>
+              <button id="btn-hold" class="small" type="button">Hold</button>
+            </div>
+            <button id="btn-again" class="primary" type="button" hidden>Play again</button>
+          </div>
+        </div>
       </div>
-      <div id="seats"></div>
+
+      <aside id="odds" class="odds-panel" hidden aria-live="polite">
+        <h3>Odds helper</h3>
+        <div id="odds-body"></div>
+      </aside>
     </div>
 
     <div id="controls" class="controls">
@@ -59,7 +87,7 @@
         <button id="btn-allin" class="accent" type="button">All-in <kbd>A</kbd></button>
       </div>
       <div id="between" class="between" hidden>
-        <button id="btn-deal" class="primary" type="button">Deal next hand <kbd>Space</kbd></button>
+        <button id="btn-deal" class="primary" type="button">Deal first hand <kbd>Space</kbd></button>
       </div>
       <p id="error" class="error" role="alert"></p>
     </div>

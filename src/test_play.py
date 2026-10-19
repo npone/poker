@@ -8,7 +8,8 @@ import play
 def _view(**kw):
     base = dict(hole=e.cards("As Kd"), board=[], pot=6, my_stack=100, to_call=0,
                 can_check=True, can_raise=True, min_raise_to=6, allin_to=100,
-                seat=0, street="flop", my_street_bet=0, num_active=3)
+                seat=0, street="flop", my_street_bet=0, num_active=3,
+                folded=[False, False, False])
     base.update(kw)
     return base
 
