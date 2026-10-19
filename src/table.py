@@ -44,7 +44,9 @@ class Table:
         rng = random.Random(seed)
         self.names = ["You"] + BOT_NAMES[: players - 1]
         self.game = e.HoldemGame([stack] * players, sb=sb, bb=bb, button=0, rng=rng)
-        self.bots = {s: make_bot(rng.randrange(1 << 30)) for s in range(1, players)}
+        seeds = {s: rng.randrange(1 << 30) for s in range(1, players)}
+        self.bots = {s: make_bot(seed) for s, seed in seeds.items()}
+        self.bot_params = {s: [seeds[s], self.bots[s].risk] for s in self.bots}   # for restore()
         self.hand_no = 0
         self.street = None
         self._bet_open = False
@@ -161,6 +163,29 @@ class Table:
         self._events.append(ev)
         if self._rec is not None:
             self._rec["events"].append(ev)
+
+    # -- saving between hands (signed-in players) ---------------------------------
+    def snapshot(self) -> dict:
+        """Everything needed to rebuild this table later with restore(). Between hands only:
+        a hand in progress lives in a generator and cannot be saved."""
+        if self.in_hand:
+            raise TableError("cannot save mid-hand")
+        g = self.game
+        return {"v": 1, "stacks": [p.stack for p in g.players], "button": g.button,
+                "sb": g.sb, "bb": g.bb, "hand_no": self.hand_no,
+                "bots": {str(s): v for s, v in self.bot_params.items()}}
+
+    @classmethod
+    def restore(cls, snap: dict) -> "Table":
+        stacks = snap["stacks"]
+        t = cls(players=len(stacks), stack=max(stacks + [snap["bb"]]), sb=snap["sb"], bb=snap["bb"])
+        for p, st in zip(t.game.players, stacks):
+            p.stack = st
+        t.game.button = snap["button"]
+        t.hand_no = snap["hand_no"]
+        t.bot_params = {int(s): v for s, v in snap["bots"].items()}
+        t.bots = {s: make_bot(seed, risk) for s, (seed, risk) in t.bot_params.items()}
+        return t
 
     # -- hand history ----------------------------------------------------------
     def hands(self) -> list[dict]:

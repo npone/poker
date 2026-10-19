@@ -4,23 +4,34 @@ same /api/v1 endpoints the web client does.
 
     cd src && uvicorn server:app --host 127.0.0.1 --port 8092
 
-    POST /api/v1/tables                 {players, stack, sb, bb}  -> {id, state}
+    POST /api/v1/tables                 {players, stack, sb, bb, token?}  -> {id, state, ranked}
     GET  /api/v1/tables/{id}                                      -> state
     POST /api/v1/tables/{id}/deal                                 -> state
     POST /api/v1/tables/{id}/act        {action, amount?}         -> state
     GET  /api/v1/tables/{id}/odds[?raise_to=N]  hero's pot odds, equity, EV, outs (hero's turn)
     GET  /api/v1/tables/{id}/hands               finished hands kept for replay (last 50)
     GET  /api/v1/tables/{id}/hands/{n}           one hand's record: stacks, your cards, events
+    POST /api/v1/session                {token}  -> {account, table?, state?, ranked?}  (signed in)
+    POST /api/v1/leaderboard            {token?} -> {top, you, ranked}
     GET  /api/v1/health
 
 `state` is Table.state(); its `events` list holds what happened since the previous response.
 A table id is the only credential: whoever holds it plays that seat. Tables live in memory
-(lost on restart) and idle ones are evicted.
+and idle ones are evicted.
+
+Signed-in players (an npone.dev account; `token` comes from https://npone.dev/auth/token?aud=poker
+and is checked at npone.dev's /auth/introspect) also get: their table saved between hands, so it
+comes back after a reload, on another device or after a restart; and lifetime stats on the
+leaderboard, counted only at the ranked settings (RANKED). Guests start fresh every time.
 """
 from __future__ import annotations
 
+import json
+import os
 import secrets
 import threading
+import urllib.error
+import urllib.request
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -31,12 +42,16 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from table import Table, TableError
+from store import DEFAULT_PATH, Store
+from table import HERO, Table, TableError
 
 MAX_TABLES = 2000                   # shortcut: in-memory store, single process; a DB if scaled
 IDLE_SECONDS = 2 * 3600             # only idle tables are evicted; when full of live ones -> 503
 CREATE_LIMIT = (20, 600)            # new tables per client IP per window (count, seconds)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+AUTH_URL = os.environ.get("POKER_AUTH_URL", "http://127.0.0.1:8090")   # npone-site, same box
+RANKED = {"stack": 100, "sb": 1, "bb": 2}   # only these settings count toward the leaderboard
+BOOT = secrets.token_hex(6)         # tells "server restarted mid-hand" from "player walked away"
 
 
 class NewTable(BaseModel):
@@ -44,6 +59,11 @@ class NewTable(BaseModel):
     stack: int = Field(100, ge=10, le=1_000_000)
     sb: int = Field(1, ge=1)
     bb: int = Field(2, ge=1)
+    token: str | None = Field(None, max_length=2000)
+
+
+class Token(BaseModel):
+    token: str | None = Field(None, max_length=2000)
 
 
 class Action(BaseModel):
@@ -56,11 +76,23 @@ class _Entry:
         self.table = table
         self.lock = threading.Lock()                 # the hand generator is not re-entrant
         self.seen = time.monotonic()
+        self.account = None                          # signed-in owner's account id, if any
+        self.ranked = False
+        self.recorded = table.hand_no                # last hand counted in the owner's stats
 
 
 _tables: OrderedDict[str, _Entry] = OrderedDict()
 _store_lock = threading.Lock()
 _creates: dict[str, list[float]] = {}
+_by_account: dict[str, str] = {}                     # account id -> its live table id
+_db: Store | None = None
+
+
+def store() -> Store:
+    global _db
+    if _db is None:
+        _db = Store(os.environ.get("POKER_DB") or DEFAULT_PATH)
+    return _db
 
 app = FastAPI(title="poker", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -110,9 +142,97 @@ def _call(tid: str, fn):
     ent = _get(tid)
     with ent.lock:
         try:
-            return fn(ent.table)
+            out = fn(ent.table)
         except TableError as err:
             raise HTTPException(400, str(err))
+        if ent.account:
+            _persist(ent)
+        return out
+
+
+# -- signed-in players ------------------------------------------------------------
+def _introspect(token: str) -> tuple[str, str | None] | None:
+    """(account id, display name) for a valid npone.dev token, else None."""
+    req = urllib.request.Request(f"{AUTH_URL}/auth/introspect", method="POST",
+                                 data=json.dumps({"aud": "poker", "token": token}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            body = json.load(r)
+    except urllib.error.HTTPError as err:
+        if err.code == 401:
+            return None
+        raise HTTPException(503, "sign-in service unavailable")
+    except (OSError, ValueError):
+        raise HTTPException(503, "sign-in service unavailable")
+    return (body["id"], body.get("name")) if body.get("ok") else None
+
+
+def _account(token: str | None) -> str:
+    who = _introspect(token) if token else None
+    if who is None:
+        raise HTTPException(401, "not signed in (or the sign-in expired); reload to retry")
+    store().touch(*who)
+    return who[0]
+
+
+def _persist(ent: _Entry):
+    """After every deal/act on a signed-in player's table (under its lock): count finished
+    hands, save the table between hands, and mark chips at risk while a ranked hand runs."""
+    t, acct, db = ent.table, ent.account, store()
+    if t.in_hand:
+        if ent.ranked:
+            db.set_pending(acct, {"hand_no": t.hand_no, "boot": BOOT,
+                                  "at_risk": t.game.players[HERO].contributed})
+        return
+    if t.result is None or t.hand_no == ent.recorded:
+        return
+    ent.recorded = t.hand_no
+    if ent.ranked:
+        won = sum(p["amount"] // len(p["winners"]) for p in t.result["pots"] if HERO in p["winners"])
+        db.add_hand(acct, t.result["net"][HERO], won)
+        if t.game_over and t.game.players[HERO].stack > 0:
+            db.add_win(acct)
+    if t.game_over:
+        db.drop_table(acct)                          # finished: the next session starts fresh
+    else:
+        db.save_table(acct, t.snapshot(), ent.ranked)
+
+
+def _forfeit(acct: str, at_risk: int):
+    """A ranked hand was abandoned (new game, or walked away until evicted): the chips the
+    player had in the pot count as lost, as if they had folded."""
+    if at_risk:
+        store().add_hand(acct, -at_risk, 0)
+
+
+def _retire(acct: str):
+    """Put away the player's previous table before they start another."""
+    db, old = store(), _by_account.pop(acct, None)
+    with _store_lock:
+        ent = _tables.pop(old, None) if old else None
+    if ent is not None:
+        with ent.lock:
+            if ent.ranked and ent.table.in_hand:
+                _forfeit(acct, ent.table.game.players[HERO].contributed)
+    else:
+        saved = db.load_table(acct)
+        p = saved and saved["pending"]
+        if p and saved["ranked"] and p["boot"] == BOOT:
+            _forfeit(acct, p["at_risk"])
+    db.drop_table(acct)
+
+
+def _add(t: Table, ip: str | None = None) -> tuple[str, _Entry]:
+    tid, ent = secrets.token_urlsafe(16), _Entry(t)
+    with _store_lock:
+        if ip is not None and _rate_limited(ip):
+            raise HTTPException(429, "too many new tables; try again in a few minutes")
+        _evict()
+        if len(_tables) >= MAX_TABLES:
+            raise HTTPException(503, "server is full; try again later")
+        _tables[tid] = ent
+    return tid, ent
 
 
 @app.get("/api/v1/health")
@@ -128,15 +248,64 @@ def create_table(req: NewTable, request: Request):
         t = Table(players=req.players, stack=req.stack, sb=req.sb, bb=req.bb)
     except TableError as err:
         raise HTTPException(400, str(err))
-    tid = secrets.token_urlsafe(16)
+    acct = _account(req.token) if req.token else None
+    tid, ent = _add(t, ip)
+    ranked = False
+    if acct:
+        _retire(acct)
+        ranked = {"stack": req.stack, "sb": req.sb, "bb": req.bb} == RANKED
+        ent.account, ent.ranked = acct, ranked
+        _by_account[acct] = tid
+        if ranked:
+            store().add_session(acct)
+        store().save_table(acct, t.snapshot(), ranked)
+    return {"id": tid, "state": t.state(), "ranked": ranked}
+
+
+@app.post("/api/v1/session")
+def session(req: Token):
+    """A signed-in player's way back in: their live table, or the one saved between hands."""
+    acct = _account(req.token)
+    db = store()
     with _store_lock:
-        if _rate_limited(ip):
-            raise HTTPException(429, "too many new tables; try again in a few minutes")
-        _evict()
-        if len(_tables) >= MAX_TABLES:
-            raise HTTPException(503, "server is full; try again later")
-        _tables[tid] = _Entry(t)
-    return {"id": tid, "state": t.state()}
+        tid = _by_account.get(acct)
+        ent = _tables.get(tid) if tid else None
+    if ent is None:
+        saved = db.load_table(acct)
+        if saved:
+            t = Table.restore(saved["snap"])         # as it was before any unfinished hand
+            p = saved["pending"]
+            # walked away mid-hand and the table was evicted: the chips in the pot are lost, in
+            # the stats and on the table. (From an earlier boot, a restart cut it short: void.)
+            if p and saved["ranked"] and p["boot"] == BOOT and p["at_risk"]:
+                _forfeit(acct, p["at_risk"])
+                me = t.game.players[HERO]
+                lost = min(p["at_risk"], me.stack)
+                me.stack -= lost
+                next((q for q in t.game.players[1:] if q.stack > 0), t.game.players[1]).stack += lost
+            tid, ent = _add(t)
+            ent.account, ent.ranked = acct, saved["ranked"]
+            _by_account[acct] = tid
+            if t.game_over:
+                db.drop_table(acct)
+            else:
+                db.save_table(acct, t.snapshot(), saved["ranked"])
+    out = {"account": db.stats(acct), "ranked_settings": RANKED}
+    if ent is not None:
+        with ent.lock:
+            out |= {"table": tid, "state": ent.table.state(), "ranked": ent.ranked}
+    return out
+
+
+@app.post("/api/v1/leaderboard")
+def leaderboard(req: Token):
+    you = None
+    if req.token:
+        try:
+            you = store().stats(_account(req.token))
+        except HTTPException:
+            pass                                     # an expired token just means no "you" row
+    return {"top": store().leaderboard(), "you": you, "ranked_settings": RANKED}
 
 
 @app.get("/api/v1/tables/{tid}")

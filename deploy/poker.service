@@ -17,6 +17,7 @@ MemoryLimit=512M
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=/home/nliu/dev/poker/data
 PrivateTmp=true
 
 [Install]

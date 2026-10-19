@@ -442,6 +442,32 @@ button.link:hover { color: #fff; }
 .hist-steps li.street, .hist-steps li.hand { color: #8f9a95; font-weight: 700; margin-top: 4px; }
 .hist-steps li.result { color: var(--gold); font-weight: 700; }
 .hist-steps li.current { background: rgba(245,197,66,.18); color: #fff; }
+/* ── accounts and leaderboard ────────────────────────────────────────── */
+.account { font-size: 13px; white-space: nowrap; }
+.account a { color: var(--primary); font-weight: 700; }
+button.acct { --b: color-mix(in srgb, var(--gold), #fff 35%); --ink: #3a2c00; }
+#btn-board { min-height: 34px; }
+.setup-note { margin: 0; font-size: 13px; color: var(--muted); }
+.history.lb { width: min(720px, calc(100vw - 24px)); }
+.lb-body { padding: 14px 16px 16px; overflow: auto; }
+.lb-you {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; padding: 10px 12px; margin-bottom: 12px;
+  border-radius: 12px; background: rgba(245,197,66,.1); border: 1px solid rgba(245,197,66,.35); font-size: 14px;
+}
+.lb-you b { color: var(--gold); font-size: 16px; }
+.lb-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.lb-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8f9a95; padding: 6px 8px; }
+.lb-table td { padding: 7px 8px; border-top: 1px solid rgba(255,255,255,.07); }
+.lb-table td:nth-child(n+3), .lb-table th:nth-child(n+3) { text-align: right; }
+.lb-table tr:nth-child(-n+3) td:first-child { color: var(--gold); font-weight: 800; }
+.lb-table tr.you td { background: rgba(245,197,66,.14); font-weight: 700; }
+.lb-table td.empty { text-align: center; color: #8f9a95; padding: 18px; }
+.up { color: #8dffb9; }
+.down { color: #ff9c92; }
+.lb-note { font-size: 12px; color: #8f9a95; margin: 12px 0 0; }
+@media (max-width: 560px) {
+  .lb-table th:nth-child(5), .lb-table td:nth-child(5), .lb-table th:nth-child(6), .lb-table td:nth-child(6) { display: none; }
+}
 @keyframes pop-in { from { transform: scale(.94); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (max-width: 700px) {
   .hist-body { grid-template-columns: 1fr; overflow: auto; }
