@@ -7,7 +7,7 @@
 <meta name="description" content="No-Limit Texas Hold'em against bots.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/@fontsource/michroma@5.3.0/files/michroma-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <main id="app">
@@ -32,6 +32,8 @@
         <option value="7">after 7 s</option><option value="12">after 12 s</option>
         <option value="0">when I click</option>
       </select></label>
+    <button id="btn-board" class="small" type="button" title="Leaderboard (L)">🏆 Leaderboard</button>
+    <span id="account" class="account"></span>
     <button id="new-game" class="ghost" type="button">New game</button>
   </header>
 
@@ -46,6 +48,7 @@
         <input name="sb" type="number" min="1" value="1" required></label>
       <label>Big blind
         <input name="bb" type="number" min="1" value="2" required></label>
+      <p id="setup-note" class="setup-note"></p>
       <button type="submit" class="primary">Sit down</button>
       <p id="setup-error" class="error" role="alert"></p>
     </form>
@@ -146,7 +149,21 @@
       <ol id="hist-steps" class="hist-steps"></ol>
     </div>
   </dialog>
+  <dialog id="leaderboard" class="history lb" aria-labelledby="lb-title">
+    <div class="hist-head">
+      <h2 id="lb-title">Leaderboard</h2>
+      <button id="lb-close" class="small" type="button">Close <kbd>Esc</kbd></button>
+    </div>
+    <div class="lb-body">
+      <div id="lb-you" class="lb-you"></div>
+      <table class="lb-table">
+        <thead><tr><th>#</th><th>Player</th><th>Chips won</th><th>Hands</th><th>Tables won</th><th>Best pot</th></tr></thead>
+        <tbody id="lb-rows"></tbody>
+      </table>
+      <p id="lb-note" class="lb-note"></p>
+    </div>
+  </dialog>
 </main>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

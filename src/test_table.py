@@ -167,3 +167,27 @@ def test_history_keeps_only_the_last_hands():
             s = t.act("fold") if not s["to_act"]["can_check"] else t.act("check")
     assert len(t.history) == table.HISTORY
     assert t.history[0]["hand_no"] == 6 and t.hand_record(1) is None
+
+
+def test_snapshot_restore_round_trip():
+    t = Table(players=5, stack=80, sb=2, bb=4, seed=3)
+    rng = random.Random(3)
+    for _ in range(6):
+        if t.game_over:
+            break
+        s = t.deal()
+        while s["in_hand"]:
+            s = _hero_random(t, s, rng)
+            if s["in_hand"]:
+                try:
+                    t.snapshot(); assert False, "saved mid-hand"
+                except TableError:
+                    pass
+    snap = json.loads(json.dumps(t.snapshot()))                     # survives JSON storage
+    r = Table.restore(snap)
+    assert r.snapshot() == snap
+    assert [b.risk for b in r.bots.values()] == [b.risk for b in t.bots.values()]
+    if not r.game_over:
+        s = r.deal()                                                 # and it plays on
+        assert s["hand_no"] == snap["hand_no"] + 1
+        assert sum(p.stack + p.contributed for p in r.game.players) == 400
