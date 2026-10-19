@@ -4,10 +4,13 @@
 
 const API = "api/v1";
 const OLD_TABLE_KEY = "poker.table";      // guests used to resume from here; now they start fresh
-// npone.dev accounts: signed-in players keep their table and get on the leaderboard.
-// Elsewhere (a local dev server) set localStorage "poker.auth" to a test npone-site's origin.
-const AUTH = location.hostname === "npone.dev" || location.hostname.endsWith(".npone.dev")
-  ? "https://npone.dev" : load("poker.auth");
+// npone accounts: signed-in players keep their table and get on the leaderboard. Sign-in lives on
+// the domain this page is a subdomain of (poker.npone.dev -> npone.dev), so a domain move needs
+// no change here. Elsewhere (a local dev server) set localStorage "poker.auth" to a test
+// npone-site's origin.
+const AUTH = location.hostname.startsWith("poker.")
+  ? `https://${location.hostname.slice("poker.".length)}` : load("poker.auth");
+const AUTH_HOST = AUTH ? new URL(AUTH).host : "";
 const ODDS_KEY = "poker.odds";
 const SOUND_KEY = "poker.sound";           // "0" = muted
 const VOLUME_KEY = "poker.volume";         // 0-100
@@ -816,7 +819,7 @@ function renderAccount() {
   if (me) {
     const chip = el("button", "small acct", `★ ${me.name}`);
     chip.type = "button";
-    chip.title = "Signed in with npone.dev: your table and stats are kept";
+    chip.title = `Signed in with ${AUTH_HOST}: your table and stats are kept`;
     chip.addEventListener("click", openBoard);
     a.append(chip);
     $("setup-note").textContent = "Signed in as " + me.name + ". 4 players, 100 chips, blinds 1/2 is ranked; "
@@ -828,11 +831,11 @@ function renderAccount() {
       link.href = `${AUTH}/login`;
       link.target = "_blank";
       link.rel = "noopener";
-      link.title = "Sign in at npone.dev to keep your progress and join the leaderboard";
+      link.title = `Sign in at ${AUTH_HOST} to keep your progress and join the leaderboard`;
       a.append(link);
     }
     $("setup-note").textContent = "Playing as a guest: nothing is saved, and a reload starts fresh."
-      + (AUTH ? " Sign in at npone.dev to keep your progress and get on the leaderboard." : "");
+      + (AUTH ? ` Sign in at ${AUTH_HOST} to keep your progress and get on the leaderboard.` : "");
   }
   if (cur && !$("table-view").hidden) renderInfo();
 }
@@ -868,7 +871,7 @@ async function openBoard() {
       el("span", y.net > 0 ? "up" : y.net < 0 ? "down" : "", `${fmtNet(y.net)} chips`),
       el("span", "", `${y.hands} hands · ${y.sessions} sessions · ${y.wins} tables won`));
   } else {
-    you.append(el("span", "", AUTH ? "Playing as a guest. Sign in at npone.dev to keep your progress and appear here." : "Playing as a guest."));
+    you.append(el("span", "", AUTH ? `Playing as a guest. Sign in at ${AUTH_HOST} to keep your progress and appear here.` : "Playing as a guest."));
   }
   const rs = b.ranked_settings;
   $("lb-note").textContent = `Counts every finished hand at the ranked settings (${rs.players} players, ${rs.stack} chips, blinds ${rs.sb}/${rs.bb}), `
