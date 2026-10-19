@@ -42,7 +42,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 | `engine.py` | 473 | **The engine (current).** `Card`, `Deck`, `evaluate5`/`evaluate`/`hand_name`, `Player`, `HoldemGame` (betting rounds, side pots, showdown, multi-hand), built-in bot policies |
 | `table.py` | — | **Session layer** every front end drives: hero (seat 0) vs bots; `deal()`, `act(kind, amount)`, `state()` → JSON snapshot with an `events` log. Hides other players' hole cards except at showdown |
 | `server.py` | — | **HTTP API** `/api/v1` (FastAPI) over `table.py`, + serves `web/`. In-memory tables, capped/idle-evicted, per-table lock |
-| `bots.py` | — | Equity bots (`make_bot(seed, risk=None)`, `style`, `BOT_NAMES`, `SIMS`), shared by CLI and server; `play.py` re-exports it. Each bot gets a random risk tolerance 0–1 (`policy.risk`) |
+| `bots.py` | — | Equity bots (`make_bot(seed, risk=None)`, `BOT_NAMES`, `SIMS`), shared by CLI and server; `play.py` re-exports it. Each bot gets a random risk tolerance 0–1 (`policy.risk`). **Never expose it in `state`** — Ning: the player must not see bot styles |
 | `odds.py` | — | `fast_eval` (same tuples as `engine.evaluate`, ~10 µs), `equity` (Monte Carlo vs random hands), `outs`, `pot_odds` |
 | `conftest.py` | — | Sets `bots.SIMS = 20` so the suite stays fast; production uses 250 |
 | `play.py` | — | **Interactive CLI** (argparse) — you + bots in the terminal |
@@ -198,6 +198,10 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   textured buttons and table; equity bots with a random risk tolerance; an optional odds helper
   (header toggle or `O`) fed by `GET /api/v1/tables/{id}/odds`. Animations are WAAPI on
   persistent seat elements (`buildSeats` once, `updateSeats` per event), not DOM rebuilds.
+  Follow-ups the same day: a "Next hand" setting (2/4/7/12 s or manual, per-viewer
+  localStorage `poker.next`); each seat's last move stays up until the street ends, newest in
+  gold; bot styles hidden; a fixed side column (odds helper + hand log) so toggling the odds
+  helper never moves the table.
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
   (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
 - `README.md` still claims nothing beyond what is true; it documents the API and deploy.
