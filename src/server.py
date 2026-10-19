@@ -8,6 +8,7 @@ same /api/v1 endpoints the web client does.
     GET  /api/v1/tables/{id}                                      -> state
     POST /api/v1/tables/{id}/deal                                 -> state
     POST /api/v1/tables/{id}/act        {action, amount?}         -> state
+    GET  /api/v1/tables/{id}/odds       hero's pot odds, equity, outs (only on hero's turn)
     GET  /api/v1/health
 
 `state` is Table.state(); its `events` list holds what happened since the previous response.
@@ -149,6 +150,11 @@ def deal(tid: str):
 @app.post("/api/v1/tables/{tid}/act")
 def act(tid: str, req: Action):
     return _call(tid, lambda t: t.act(req.action, req.amount))
+
+
+@app.get("/api/v1/tables/{tid}/odds")
+def table_odds(tid: str):
+    return _call(tid, lambda t: t.odds())
 
 
 if WEB_DIR.is_dir():
