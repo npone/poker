@@ -82,10 +82,9 @@ account id and the profile name; poker never sees an email. For them:
 
 ## Deploy (dev176)
 
-`sudo bash deploy/install.sh` installs `poker.service` (uvicorn on `127.0.0.1:8094`, low
-priority) and routes `poker.npone.dev` to it through the existing Cloudflare tunnel, rolling the
-tunnel config back if any route stops answering. Take the tunnel lease first (`~/dev/CLAUDE.md`).
-The service runs from this checkout: `sudo systemctl restart poker` after merging to `master`.
+`poker.service` (uvicorn on `127.0.0.1:8094`, low priority) and the `poker.npone.dev` tunnel route
+are generated from `npone-site/deploy/hosts.toml` by `npone-site/deploy/sync-hosts.py` (PORTABILITY.md step D): change them there, never in `/etc`. The service runs from this
+checkout: `sudo systemctl restart poker` after merging to `master`.
 
 At your turn: `k`=check  `c`=call  `f`=fold  `b/r <N>`=bet/raise to N  `a`=all-in  `q`=quit.
 

@@ -3,7 +3,7 @@
 A **No-Limit Texas Hold'em** game: a headless Python engine, a UI-agnostic session layer, a
 JSON HTTP API, a static web client (live at https://poker.npone.dev), an interactive terminal
 CLI, and a separate legacy ASCII card-art / hand-classifier codebase that predates it. Python is
-in `src/`, the web client in `web/`, deployment in `deploy/`.
+in `src/`, the web client in `web/`. The unit and tunnel route live in npone-site's `deploy/hosts.toml`.
 
 **Goal (Ning, 2026-10-18):** a complete poker game. Stage 1 is the web interface; iOS and
 Android apps follow **for the same underlying program**. So the layering is the point:
@@ -15,7 +15,8 @@ decided 2026-10-18 — no on-device engine, no offline play). Stage 1 is you vs 
 **Last updated:** 2026-10-18
 
 No cloud and no credentials — nothing here costs money. The one thing outside the repo is the
-deployed service (`poker.service`, and the `poker.npone.dev` rule in the shared tunnel config).
+deployed service (`poker.service` and the `poker.npone.dev` tunnel rule, both
+generated from `npone-site/deploy/hosts.toml` by `npone-site/deploy/sync-hosts.py`).
 
 ---
 
@@ -49,7 +50,6 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 | `play.py` | — | **Interactive CLI** (argparse) — you + bots in the terminal |
 | `test_table.py` / `test_server.py` | — | Session fuzz (chips conserved, cards hidden, games end, JSON-able) / HTTP contract |
 | `../web/` | — | Static web client (`index.html`, `app.js`, `style.css`), no build step, no framework, **no game rules** |
-| `../deploy/` | — | `poker.service` + `install.sh` (service + tunnel route with rollback) |
 | `poker.py` | 55 | Headless bot-vs-bot demo; prints each hand |
 | `test_engine.py` | 228 | Engine regression suite: evaluator, blinds, raise/reopen, pot building, showdown, fuzz, full-game termination |
 | `test_play.py` | 65 | Tests the CLI's human input parser and the bot policy's legality |
