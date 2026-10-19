@@ -225,11 +225,28 @@ def test_replaced_table_is_never_counted_or_saved_again(accounts):
     b = _new(players=4, token="tok-ann")                              # a new game replaces it
     assert a["id"] not in server._tables and old.account is None      # retired
     assert server._by_account["acct-ann"] == b["id"]
-    hands = accounts.stats("acct-ann")["hands"]
-    old.account = "acct-ann"                                          # even if a request already
-    server._persist(old)                                              # in flight gets through
-    assert accounts.stats("acct-ann")["hands"] == hands
     assert accounts.load_table("acct-ann")["snap"] == server._tables[b["id"]].table.snapshot()
+
+
+def test_hand_ending_while_its_table_is_replaced_still_counts(accounts):
+    import threading
+    import time
+    a = _new(players=4, token="tok-ann")
+    s = client.post(f"/api/v1/tables/{a['id']}/deal").json()
+    while not s["in_hand"]:
+        s = client.post(f"/api/v1/tables/{a['id']}/deal").json()
+    old, before = server._tables[a["id"]], accounts.stats("acct-ann")
+    with old.lock:                                    # an act is mid-flight on the old table...
+        t = threading.Thread(target=lambda: _new(players=4, token="tok-ann"))
+        t.start()                                     # ...while a new game starts (blocks in _retire)
+        time.sleep(0.3)
+        while old.table.in_hand:                      # the act finishes the hand, as _call would
+            old.table.act("fold")
+        server._persist(old)
+    t.join()
+    after = accounts.stats("acct-ann")
+    assert after["hands"] == before["hands"] + 1      # counted once: not lost, not forfeited too
+    assert after["net"] == before["net"] + old.table.result["net"][0]
 
 
 def test_concurrent_new_games_bind_one_table(accounts):

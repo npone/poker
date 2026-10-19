@@ -190,11 +190,11 @@ def _account(token: str | None, ip: str) -> str:
 
 def _persist(ent: _Entry):
     """After a deal or act on a signed-in player's table (under its lock): count a finished
-    hand and save the table, or mark the chips at risk while a ranked hand runs. A table that
-    has been replaced (retired) is never counted or saved again."""
+    hand and save the table, or mark the chips at risk while a ranked hand runs. A replaced
+    table never gets here: _retire clears ent.account under the same lock _call holds, so
+    whichever of them takes the lock first decides (hand counted, or hand forfeit), never both
+    or neither."""
     t, acct, db = ent.table, ent.account, store()
-    if _by_account.get(acct) != ent.tid:
-        return
     if t.in_hand:
         if ent.ranked:
             db.set_pending(acct, {"hand_no": t.hand_no, "boot": BOOT,

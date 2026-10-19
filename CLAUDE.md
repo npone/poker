@@ -216,7 +216,8 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   `server.py` (4 players, 100 chips, 1/2). `BOOT` tells a restart (void hand) from walking
   away (forfeit); a restart therefore lets a hand in progress be abandoned free (accepted).
   `_account_lock` keeps one bound table per account; a replaced entry gets `account=None`
-  and `_persist` (deal/act only) also checks `_by_account[acct] == ent.tid`. Sign-in checks
+  under `ent.lock`, which `_call` also holds: whichever takes the lock first decides (hand
+  counted, or forfeit). Do not add a `_by_account` check in `_persist`: it lost such hands. Sign-in checks
   are rate-limited per IP (`AUTH_LIMIT`); npone tokens are one-time nonces. The unit's only
   writable path is `data/` (`ReadWritePaths`). Guests are never stored, and the client no
   longer resumes them from localStorage. Tests fake introspect (`accounts` fixture in
