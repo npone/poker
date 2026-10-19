@@ -391,7 +391,7 @@ function hideWinner() { $("winner").hidden = true; $("felt").classList.remove("r
 const nextMs = () => +$("next-secs").value * 1000;
 
 function scheduleNext() {
-  if (nextTimer || held || busy) return;
+  if (nextTimer || held || busy || $("history").open) return;
   const ring = $("next-ring"), ms = nextMs();
   ring.style.animation = "none";
   $("next").classList.toggle("manual", !ms);
@@ -533,6 +533,7 @@ function render() {
 
   const a = s.to_act;
   $("actions").hidden = !a || busy;
+  $("btn-history").disabled = !(s.hand_no > 1 || (s.hand_no === 1 && !s.in_hand));
   const between = !s.in_hand && !busy && !s.result && !s.game_over;   // first hand, or a voided one
   $("between").hidden = !between;
   $("btn-deal").innerHTML = (s.hand_no ? "Deal next hand" : "Deal first hand") + " <kbd>Space</kbd>";
@@ -676,6 +677,119 @@ function sizingHint() {
   }, 180);
 }
 
+// ── hand history replay ──────────────────────────────────────────────────
+// The server keeps each finished hand's event log as you saw it; this steps through one,
+// rebuilding the table at step i from the events' own numbers (no game rules here).
+const hist = { rec: null, i: 0, timer: null };
+
+async function openHistory(handNo) {
+  let list;
+  try { list = await api(`tables/${tid}/hands`); } catch (err) { $("error").textContent = err.message; return; }
+  if (!list.length) { $("error").textContent = "No finished hands yet."; return; }
+  cancelNext();                                       // the next deal waits while you watch
+  $("hist-pick").replaceChildren(...list.slice().reverse().map((h) => {
+    const who = h.winners.map(name).join(" & ");
+    const o = el("option", "", `Hand ${h.hand_no} · ${who} won ${h.pot} · you ${h.net > 0 ? "+" : h.net < 0 ? "−" : "±"}${Math.abs(h.net)}`);
+    o.value = h.hand_no;
+    return o;
+  }));
+  const n = handNo && list.some((h) => h.hand_no === handNo) ? handNo : list[list.length - 1].hand_no;
+  $("hist-pick").value = n;
+  if (!$("history").open) $("history").showModal();
+  await loadHand(n);
+}
+
+async function loadHand(n) {
+  stopPlay();
+  try { hist.rec = await api(`tables/${tid}/hands/${n}`); } catch (err) { $("hist-caption").textContent = err.message; return; }
+  const evs = hist.rec.events;
+  $("hist-scrub").max = evs.length - 1;
+  $("hist-steps").replaceChildren(...evs.map((ev, i) => {
+    const li = el("li", "step " + ev.type, stepText(ev));
+    li.addEventListener("click", () => { stopPlay(); go(i); });
+    return li;
+  }));
+  $("hist-board").replaceChildren(); $("hist-board").dataset.key = "";
+  go(Math.min(1, evs.length - 1));                    // start with the cards dealt
+}
+
+function stepText(ev) {
+  const r = hist.rec;
+  if (ev.type === "hand") return `Hand ${ev.hand_no} — ${r.players[ev.button].name === "You" ? "you have" : r.players[ev.button].name + " has"} the button`;
+  if (ev.type === "street") return ev.street === "preflop" ? "Cards dealt, blinds posted" : `${ev.street[0].toUpperCase() + ev.street.slice(1)}: ${ev.board.map(cardText).join(" ")}`;
+  if (ev.type === "action") return describe(ev);
+  return resultText(ev);
+}
+
+function histState(i) {
+  const r = hist.rec, n = r.players.length;
+  const st = { stacks: r.players.map((p) => p.stack), bets: Array(n).fill(0), pot: 0, board: [],
+               folded: {}, said: {}, last: null, result: null };
+  for (const ev of r.events.slice(0, i + 1)) {
+    if (ev.type === "street") {
+      Object.assign(st, { board: ev.board, stacks: [...ev.stacks], bets: [...ev.bets], pot: ev.pot, said: {}, last: null });
+    } else if (ev.type === "action") {
+      st.stacks[ev.seat] = ev.stack; st.bets[ev.seat] = ev.street_bet; st.pot = ev.pot;
+      if (ev.action === "fold") st.folded[ev.seat] = true;
+      st.said[ev.seat] = describe(ev, true); st.last = ev.seat;
+    } else if (ev.type === "result") {
+      st.result = ev; st.pot = 0; st.bets = st.bets.map(() => 0); st.said = {}; st.last = null;
+      st.stacks = r.players.map((p, j) => p.stack + ev.net[j]);
+    }
+  }
+  return st;
+}
+
+function go(i) {
+  const r = hist.rec;
+  if (!r) return;
+  hist.i = Math.max(0, Math.min(i, r.events.length - 1));
+  const st = histState(hist.i), ev = r.events[hist.i];
+  const winners = st.result ? new Set(st.result.pots.flatMap((p) => p.winners)) : new Set();
+  setCards($("hist-board"), st.board, "board");
+  $("hist-pot").lastChild.textContent = st.result ? `Pot ${st.result.pots.reduce((t, p) => t + p.amount, 0)} paid out` : `Pot ${st.pot}`;
+  $("hist-seats").replaceChildren(...r.players.map((p) => {
+    const s = el("div", "hseat" + (st.folded[p.seat] ? " folded" : "") + (winners.has(p.seat) ? " winner" : "")
+                         + (st.last === p.seat ? " acting" : ""));
+    let hole = [];
+    if (p.seat === cur.hero) hole = r.hole;
+    else if (st.result && st.result.shown[p.seat]) hole = st.result.shown[p.seat].hole;
+    else if (!st.folded[p.seat] && r.players[p.seat].stack > 0) hole = [null, null];
+    const cards = el("div", "cards");
+    cards.append(...hole.map(cardFace));
+    const head = el("div", "hname", p.name);
+    if (p.seat === r.button) head.append(el("span", "hdealer", "D"));
+    const net = st.result ? st.result.net[p.seat] : 0;
+    s.append(head, cards, el("div", "hstack", `${st.stacks[p.seat]} chips`),
+      el("div", "hsay" + (st.last === p.seat ? " latest" : ""),
+         st.result ? (net > 0 ? `+${net}` + (st.result.shown[p.seat] ? ` · ${st.result.shown[p.seat].hand}` : "")
+                     : st.result.shown[p.seat] ? st.result.shown[p.seat].hand : "")
+                   : st.said[p.seat] || (st.bets[p.seat] ? `in for ${st.bets[p.seat]}` : "")));
+    return s;
+  }));
+  $("hist-caption").textContent = stepText(ev);
+  $("hist-scrub").value = hist.i;
+  [...$("hist-steps").children].forEach((li, k) => li.classList.toggle("current", k === hist.i));
+  $("hist-steps").children[hist.i]?.scrollIntoView({ block: "nearest" });
+  $("hist-prev").disabled = $("hist-first").disabled = hist.i === 0;
+  $("hist-next").disabled = $("hist-last").disabled = hist.i === r.events.length - 1;
+}
+
+function stopPlay() {
+  clearInterval(hist.timer); hist.timer = null;
+  $("hist-play").textContent = "▶ Play";
+}
+
+function togglePlay() {
+  if (hist.timer) { stopPlay(); return; }
+  if (hist.i >= hist.rec.events.length - 1) go(0);
+  $("hist-play").textContent = "❚❚ Pause";
+  hist.timer = setInterval(() => {
+    if (hist.i >= hist.rec.events.length - 1) { stopPlay(); return; }
+    go(hist.i + 1);
+  }, 1100);
+}
+
 // ── actions ──────────────────────────────────────────────────────────────
 async function send(path, body) {
   if (busy) return;
@@ -767,6 +881,18 @@ $("btn-deal").addEventListener("click", dealOrRestart);
 $("btn-now").addEventListener("click", dealOrRestart);
 $("btn-hold").addEventListener("click", hold);
 $("btn-again").addEventListener("click", () => showSetup());
+$("btn-replay").addEventListener("click", () => openHistory(cur && cur.hand_no));
+$("btn-history").addEventListener("click", () => openHistory());
+$("hist-close").addEventListener("click", () => $("history").close());
+$("history").addEventListener("close", () => { stopPlay(); if (cur && !busy && !$("table-view").hidden) render(); });
+$("history").addEventListener("click", (e) => { if (e.target === $("history")) $("history").close(); });   // backdrop
+$("hist-pick").addEventListener("change", (e) => loadHand(+e.target.value));
+$("hist-first").addEventListener("click", () => { stopPlay(); go(0); });
+$("hist-prev").addEventListener("click", () => { stopPlay(); go(hist.i - 1); });
+$("hist-next").addEventListener("click", () => { stopPlay(); go(hist.i + 1); });
+$("hist-last").addEventListener("click", () => { stopPlay(); go(hist.rec.events.length - 1); });
+$("hist-play").addEventListener("click", togglePlay);
+$("hist-scrub").addEventListener("input", (e) => { stopPlay(); go(+e.target.value); });
 $("raise-range").addEventListener("input", (e) => { $("raise-amount").value = e.target.value; sizingHint(); });
 $("raise-amount").addEventListener("input", (e) => { $("raise-range").value = e.target.value; sizingHint(); });
 $("raise-amount").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); raise(); } });
@@ -796,10 +922,22 @@ $("odds-toggle").addEventListener("change", (e) => { save(ODDS_KEY, e.target.che
 addEventListener("resize", () => { if (cur && seatEls.length) positionSeats(cur); });
 
 document.addEventListener("keydown", (e) => {
+  if ($("history").open) {
+    if (e.target.matches("select, input[type=range]")) return;
+    const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (k) { stopPlay(); go(hist.i + k); }
+    else if (e.key === "Home") { stopPlay(); go(0); }
+    else if (e.key === "End") { stopPlay(); go(hist.rec.events.length - 1); }
+    else if (e.key === " " && !e.target.matches("button")) togglePlay();
+    else return;
+    e.preventDefault();
+    return;
+  }
   if (e.target.matches("input") || e.metaKey || e.ctrlKey || e.altKey || !cur) return;
   if ($("table-view").hidden) return;
   const k = e.key.toLowerCase();
   if (k === "o") { $("odds-toggle").click(); return; }
+  if (k === "h") { if (!$("btn-history").disabled) openHistory(); return; }
   if (k === "m") { $("sound-toggle").click(); return; }
   if (busy) return;
   if (cur.to_act) {
