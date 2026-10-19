@@ -12,6 +12,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "poker.db"
@@ -41,10 +42,16 @@ class Store:
             db.executescript(_SCHEMA)
         os.chmod(self.path, 0o600)
 
+    @contextmanager
     def _db(self):
+        """A connection inside one transaction (committed on success), always closed."""
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def _write(self, sql: str, args=()):
         with self._lock, self._db() as db:
@@ -61,14 +68,20 @@ class Store:
         self._write("UPDATE accounts SET sessions = sessions + 1, updated = ? WHERE id = ?",
                     (time.time(), acct))
 
-    def add_hand(self, acct: str, net: int, won: int):
-        self._write("UPDATE accounts SET net = net + ?, hands = hands + 1, "
-                    "best_pot = MAX(best_pot, ?), updated = ? WHERE id = ?",
-                    (net, won, time.time(), acct))
+    def add_hand(self, acct: str, net: int, won: int, win: bool = False):
+        self._write(_ADD_HAND, (net, won, int(win), time.time(), acct))
 
-    def add_win(self, acct: str):
-        self._write("UPDATE accounts SET wins = wins + 1, updated = ? WHERE id = ?",
-                    (time.time(), acct))
+    def finish_hand(self, acct: str, ranked: bool, net: int, won: int, win: bool,
+                    snap: dict | None):
+        """A hand ended: count it (if ranked) and save the table (or drop it when the game is
+        over) in one transaction, so a crash can't count a hand yet restore the stacks before it."""
+        with self._lock, self._db() as db:
+            if ranked:
+                db.execute(_ADD_HAND, (net, won, int(win), time.time(), acct))
+            if snap is None:
+                db.execute("DELETE FROM saved WHERE id = ?", (acct,))
+            else:
+                db.execute(_SAVE, (acct, json.dumps(snap), int(ranked), time.time()))
 
     def stats(self, acct: str) -> dict | None:
         with self._db() as db:
@@ -76,24 +89,22 @@ class Store:
             if r is None:
                 return None
             rank = None
-            if r["hands"]:
-                rank = 1 + db.execute("SELECT COUNT(*) FROM accounts WHERE hands > 0 AND "
-                                      "(net > ? OR (net = ? AND hands < ?))",
-                                      (r["net"], r["net"], r["hands"])).fetchone()[0]
+            if r["hands"]:                           # same order as leaderboard(): unique ranks
+                rank = 1 + db.execute(
+                    "SELECT COUNT(*) FROM accounts WHERE hands > 0 AND (net > ? OR (net = ? AND "
+                    "(hands < ? OR (hands = ? AND id < ?))))",
+                    (r["net"], r["net"], r["hands"], r["hands"], r["id"])).fetchone()[0]
         return _public(r) | {"rank": rank}
 
     def leaderboard(self, limit: int = 25) -> list[dict]:
         with self._db() as db:
             rows = db.execute("SELECT * FROM accounts WHERE hands > 0 "
-                              "ORDER BY net DESC, hands ASC LIMIT ?", (limit,)).fetchall()
+                              "ORDER BY net DESC, hands ASC, id ASC LIMIT ?", (limit,)).fetchall()
         return [_public(r) | {"rank": i + 1} for i, r in enumerate(rows)]
 
     # -- saved tables -------------------------------------------------------------
     def save_table(self, acct: str, snap: dict, ranked: bool):
-        self._write("INSERT INTO saved (id, snap, ranked, pending, updated) VALUES (?, ?, ?, NULL, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET snap = excluded.snap, ranked = excluded.ranked, "
-                    "pending = NULL, updated = excluded.updated",
-                    (acct, json.dumps(snap), int(ranked), time.time()))
+        self._write(_SAVE, (acct, json.dumps(snap), int(ranked), time.time()))
 
     def set_pending(self, acct: str, pending: dict | None):
         self._write("UPDATE saved SET pending = ?, updated = ? WHERE id = ?",
@@ -109,6 +120,13 @@ class Store:
 
     def drop_table(self, acct: str):
         self._write("DELETE FROM saved WHERE id = ?", (acct,))
+
+
+_ADD_HAND = ("UPDATE accounts SET net = net + ?, hands = hands + 1, best_pot = MAX(best_pot, ?), "
+             "wins = wins + ?, updated = ? WHERE id = ?")
+_SAVE = ("INSERT INTO saved (id, snap, ranked, pending, updated) VALUES (?, ?, ?, NULL, ?) "
+         "ON CONFLICT(id) DO UPDATE SET snap = excluded.snap, ranked = excluded.ranked, "
+         "pending = NULL, updated = excluded.updated")
 
 
 def _public(r) -> dict:
