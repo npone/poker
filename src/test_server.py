@@ -123,6 +123,8 @@ def accounts(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_db", Store(tmp_path / "poker.db"))
     monkeypatch.setattr(server, "_introspect", lambda tok: ACCOUNTS.get(tok))
     monkeypatch.setattr(server, "_by_account", {})
+    monkeypatch.setattr(server, "_auth_tries", {})
+    monkeypatch.setattr(server, "_creates", {})
     return server._db
 
 
@@ -151,7 +153,7 @@ def test_guest_tables_touch_no_storage(accounts):
 
 def test_ranked_progress_counts_and_survives_restart(accounts):
     rng = random.Random(4)
-    body = _new(players=3, token="tok-ann")                          # defaults are the ranked ones
+    body = _new(players=4, token="tok-ann")                          # defaults are the ranked ones
     assert body["ranked"] is True
     tid = body["id"]
     net, s = _finish_hands(tid, body["state"], 6, rng)
@@ -175,7 +177,7 @@ def test_ranked_progress_counts_and_survives_restart(accounts):
 
 
 def test_abandoned_ranked_hand_is_forfeit_but_restart_is_void(accounts):
-    body = _new(players=2, token="tok-bo")
+    body = _new(players=4, token="tok-bo")
     tid = body["id"]
     s = client.post(f"/api/v1/tables/{tid}/deal").json()
     while not s["in_hand"]:                                           # want a live hand
@@ -192,7 +194,7 @@ def test_abandoned_ranked_hand_is_forfeit_but_restart_is_void(accounts):
     back = client.post("/api/v1/session", json={"token": "tok-bo"}).json()
     assert accounts.stats("acct-bo")["net"] == before - at_risk
     assert back["state"]["players"][0]["stack"] == 100 - at_risk
-    assert sum(p["stack"] for p in back["state"]["players"]) == 200
+    assert sum(p["stack"] for p in back["state"]["players"]) == 400
 
     # mid-hand again, but now the server restarts (new boot): void, nothing charged
     tid = back["table"]
@@ -214,3 +216,49 @@ def test_practice_settings_are_saved_but_not_ranked(accounts):
     _finish_hands(body["id"], body["state"], 2, random.Random(1))
     assert accounts.stats("acct-ann")["hands"] == 0
     assert accounts.load_table("acct-ann") is not None                # but it is kept to resume
+
+
+def test_replaced_table_is_never_counted_or_saved_again(accounts):
+    a = _new(players=4, token="tok-ann")
+    client.post(f"/api/v1/tables/{a['id']}/deal")
+    old = server._tables[a["id"]]
+    b = _new(players=4, token="tok-ann")                              # a new game replaces it
+    assert a["id"] not in server._tables and old.account is None      # retired
+    assert server._by_account["acct-ann"] == b["id"]
+    hands = accounts.stats("acct-ann")["hands"]
+    old.account = "acct-ann"                                          # even if a request already
+    server._persist(old)                                              # in flight gets through
+    assert accounts.stats("acct-ann")["hands"] == hands
+    assert accounts.load_table("acct-ann")["snap"] == server._tables[b["id"]].table.snapshot()
+
+
+def test_concurrent_new_games_bind_one_table(accounts):
+    import threading
+    ids = []
+
+    def make():
+        r = client.post("/api/v1/tables", json={"players": 4, "token": "tok-ann"})
+        ids.append(r.json()["id"])
+
+    ts = [threading.Thread(target=make) for _ in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    bound = [tid for tid in ids if tid in server._tables and server._tables[tid].account]
+    assert bound == [server._by_account["acct-ann"]]
+    assert accounts.stats("acct-ann")["sessions"] == 6
+
+
+def test_ranks_are_unique_and_match_the_board(accounts):
+    for acct in ("acct-ann", "acct-bo"):
+        accounts.touch(acct, None)
+        accounts.add_hand(acct, 5, 5)                                 # a tie on net and hands
+    assert [r["rank"] for r in accounts.leaderboard()] == [1, 2]
+    assert sorted(accounts.stats(a)["rank"] for a in ("acct-ann", "acct-bo")) == [1, 2]
+
+
+def test_sign_in_checks_are_rate_limited(accounts, monkeypatch):
+    monkeypatch.setattr(server, "AUTH_LIMIT", (2, 600))
+    codes = [client.post("/api/v1/session", json={"token": "forged"}).status_code for _ in range(3)]
+    assert codes == [401, 401, 429]

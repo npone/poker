@@ -48,9 +48,10 @@ from table import HERO, Table, TableError
 MAX_TABLES = 2000                   # shortcut: in-memory store, single process; a DB if scaled
 IDLE_SECONDS = 2 * 3600             # only idle tables are evicted; when full of live ones -> 503
 CREATE_LIMIT = (20, 600)            # new tables per client IP per window (count, seconds)
+AUTH_LIMIT = (120, 600)             # sign-in checks (each one asks npone.dev) per client IP
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 AUTH_URL = os.environ.get("POKER_AUTH_URL", "http://127.0.0.1:8090")   # npone-site, same box
-RANKED = {"stack": 100, "sb": 1, "bb": 2}   # only these settings count toward the leaderboard
+RANKED = {"players": 4, "stack": 100, "sb": 1, "bb": 2}   # only this counts on the leaderboard
 BOOT = secrets.token_hex(6)         # tells "server restarted mid-hand" from "player walked away"
 
 
@@ -76,6 +77,7 @@ class _Entry:
         self.table = table
         self.lock = threading.Lock()                 # the hand generator is not re-entrant
         self.seen = time.monotonic()
+        self.tid = None
         self.account = None                          # signed-in owner's account id, if any
         self.ranked = False
         self.recorded = table.hand_no                # last hand counted in the owner's stats
@@ -84,7 +86,9 @@ class _Entry:
 _tables: OrderedDict[str, _Entry] = OrderedDict()
 _store_lock = threading.Lock()
 _creates: dict[str, list[float]] = {}
+_auth_tries: dict[str, list[float]] = {}
 _by_account: dict[str, str] = {}                     # account id -> its live table id
+_account_lock = threading.Lock()                     # binding/replacing an account's table
 _db: Store | None = None
 
 
@@ -115,16 +119,16 @@ def _evict():
         del _tables[tid]
 
 
-def _rate_limited(ip: str) -> bool:
-    count, window = CREATE_LIMIT
+def _rate_limited(ip: str, seen: dict[str, list[float]], limit: tuple[int, int]) -> bool:
+    count, window = limit
     now = time.monotonic()
-    for k in [k for k, ts in _creates.items() if now - ts[-1] > window]:
-        del _creates[k]                              # forget clients idle past the window
-    ts = [t for t in _creates.get(ip, []) if now - t <= window]
+    for k in [k for k, ts in seen.items() if now - ts[-1] > window]:
+        del seen[k]                                  # forget clients idle past the window
+    ts = [t for t in seen.get(ip, []) if now - t <= window]
     if len(ts) >= count:
-        _creates[ip] = ts
+        seen[ip] = ts
         return True
-    _creates[ip] = ts + [now]
+    seen[ip] = ts + [now]
     return False
 
 
@@ -138,16 +142,21 @@ def _get(tid: str) -> _Entry:
         return ent
 
 
-def _call(tid: str, fn):
+def _call(tid: str, fn, persist: bool = False):
     ent = _get(tid)
     with ent.lock:
         try:
             out = fn(ent.table)
         except TableError as err:
             raise HTTPException(400, str(err))
-        if ent.account:
+        if persist and ent.account:
             _persist(ent)
         return out
+
+
+def _ip(request: Request) -> str:
+    # behind the Cloudflare tunnel every request comes from localhost; CF names the client
+    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
 
 
 # -- signed-in players ------------------------------------------------------------
@@ -168,7 +177,10 @@ def _introspect(token: str) -> tuple[str, str | None] | None:
     return (body["id"], body.get("name")) if body.get("ok") else None
 
 
-def _account(token: str | None) -> str:
+def _account(token: str | None, ip: str) -> str:
+    with _store_lock:                                # each check is a call to npone.dev: bounded
+        if _rate_limited(ip, _auth_tries, AUTH_LIMIT):
+            raise HTTPException(429, "too many sign-in checks; try again in a few minutes")
     who = _introspect(token) if token else None
     if who is None:
         raise HTTPException(401, "not signed in (or the sign-in expired); reload to retry")
@@ -177,9 +189,12 @@ def _account(token: str | None) -> str:
 
 
 def _persist(ent: _Entry):
-    """After every deal/act on a signed-in player's table (under its lock): count finished
-    hands, save the table between hands, and mark chips at risk while a ranked hand runs."""
+    """After a deal or act on a signed-in player's table (under its lock): count a finished
+    hand and save the table, or mark the chips at risk while a ranked hand runs. A table that
+    has been replaced (retired) is never counted or saved again."""
     t, acct, db = ent.table, ent.account, store()
+    if _by_account.get(acct) != ent.tid:
+        return
     if t.in_hand:
         if ent.ranked:
             db.set_pending(acct, {"hand_no": t.hand_no, "boot": BOOT,
@@ -188,15 +203,10 @@ def _persist(ent: _Entry):
     if t.result is None or t.hand_no == ent.recorded:
         return
     ent.recorded = t.hand_no
-    if ent.ranked:
-        won = sum(p["amount"] // len(p["winners"]) for p in t.result["pots"] if HERO in p["winners"])
-        db.add_hand(acct, t.result["net"][HERO], won)
-        if t.game_over and t.game.players[HERO].stack > 0:
-            db.add_win(acct)
-    if t.game_over:
-        db.drop_table(acct)                          # finished: the next session starts fresh
-    else:
-        db.save_table(acct, t.snapshot(), ent.ranked)
+    won = sum(p["amount"] // len(p["winners"]) for p in t.result["pots"] if HERO in p["winners"])
+    db.finish_hand(acct, ent.ranked, t.result["net"][HERO], won,
+                   win=t.game_over and t.game.players[HERO].stack > 0,
+                   snap=None if t.game_over else t.snapshot())   # game over: next time is fresh
 
 
 def _forfeit(acct: str, at_risk: int):
@@ -207,14 +217,15 @@ def _forfeit(acct: str, at_risk: int):
 
 
 def _retire(acct: str):
-    """Put away the player's previous table before they start another."""
+    """Put away the player's previous table before they start another (under _account_lock)."""
     db, old = store(), _by_account.pop(acct, None)
     with _store_lock:
         ent = _tables.pop(old, None) if old else None
     if ent is not None:
-        with ent.lock:
+        with ent.lock:                               # waits out a request already running on it
             if ent.ranked and ent.table.in_hand:
                 _forfeit(acct, ent.table.game.players[HERO].contributed)
+            ent.account = None                       # retired: nothing more is counted or saved
     else:
         saved = db.load_table(acct)
         p = saved and saved["pending"]
@@ -225,8 +236,9 @@ def _retire(acct: str):
 
 def _add(t: Table, ip: str | None = None) -> tuple[str, _Entry]:
     tid, ent = secrets.token_urlsafe(16), _Entry(t)
+    ent.tid = tid
     with _store_lock:
-        if ip is not None and _rate_limited(ip):
+        if ip is not None and _rate_limited(ip, _creates, CREATE_LIMIT):
             raise HTTPException(429, "too many new tables; try again in a few minutes")
         _evict()
         if len(_tables) >= MAX_TABLES:
@@ -242,18 +254,19 @@ def health():
 
 @app.post("/api/v1/tables")
 def create_table(req: NewTable, request: Request):
-    # behind the Cloudflare tunnel every request comes from localhost; CF names the client
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
+    ip = _ip(request)
     try:
         t = Table(players=req.players, stack=req.stack, sb=req.sb, bb=req.bb)
     except TableError as err:
         raise HTTPException(400, str(err))
-    acct = _account(req.token) if req.token else None
-    tid, ent = _add(t, ip)
-    ranked = False
-    if acct:
+    acct = _account(req.token, ip) if req.token else None
+    if not acct:
+        tid, _ = _add(t, ip)
+        return {"id": tid, "state": t.state(), "ranked": False}
+    ranked = {"players": req.players, "stack": req.stack, "sb": req.sb, "bb": req.bb} == RANKED
+    with _account_lock:                              # one bound table per account, ever
+        tid, ent = _add(t, ip)
         _retire(acct)
-        ranked = {"stack": req.stack, "sb": req.sb, "bb": req.bb} == RANKED
         ent.account, ent.ranked = acct, ranked
         _by_account[acct] = tid
         if ranked:
@@ -263,15 +276,15 @@ def create_table(req: NewTable, request: Request):
 
 
 @app.post("/api/v1/session")
-def session(req: Token):
+def session(req: Token, request: Request):
     """A signed-in player's way back in: their live table, or the one saved between hands."""
-    acct = _account(req.token)
+    acct = _account(req.token, _ip(request))
     db = store()
-    with _store_lock:
+    with _account_lock:
         tid = _by_account.get(acct)
-        ent = _tables.get(tid) if tid else None
-    if ent is None:
-        saved = db.load_table(acct)
+        with _store_lock:
+            ent = _tables.get(tid) if tid else None
+        saved = db.load_table(acct) if ent is None else None
         if saved:
             t = Table.restore(saved["snap"])         # as it was before any unfinished hand
             p = saved["pending"]
@@ -298,11 +311,11 @@ def session(req: Token):
 
 
 @app.post("/api/v1/leaderboard")
-def leaderboard(req: Token):
+def leaderboard(req: Token, request: Request):
     you = None
     if req.token:
         try:
-            you = store().stats(_account(req.token))
+            you = store().stats(_account(req.token, _ip(request)))
         except HTTPException:
             pass                                     # an expired token just means no "you" row
     return {"top": store().leaderboard(), "you": you, "ranked_settings": RANKED}
@@ -315,12 +328,12 @@ def get_table(tid: str):
 
 @app.post("/api/v1/tables/{tid}/deal")
 def deal(tid: str):
-    return _call(tid, lambda t: t.deal())
+    return _call(tid, lambda t: t.deal(), persist=True)
 
 
 @app.post("/api/v1/tables/{tid}/act")
 def act(tid: str, req: Action):
-    return _call(tid, lambda t: t.act(req.action, req.amount))
+    return _call(tid, lambda t: t.act(req.action, req.amount), persist=True)
 
 
 @app.get("/api/v1/tables/{tid}/odds")

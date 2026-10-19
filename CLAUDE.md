@@ -213,7 +213,11 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 - Accounts + leaderboard (Ning, 2026-10-19): sign-in is the npone.dev account. Poker trusts
   only npone-site's `/auth/introspect` (`POKER_AUTH_URL`, default `http://127.0.0.1:8090`).
   npone-site's `AUDIENCES` must list `poker` → `https://poker.npone.dev`. Ranked = `RANKED` in
-  `server.py`. `BOOT` tells a restart (void hand) from walking away (forfeit). The unit's only
+  `server.py` (4 players, 100 chips, 1/2). `BOOT` tells a restart (void hand) from walking
+  away (forfeit); a restart therefore lets a hand in progress be abandoned free (accepted).
+  `_account_lock` keeps one bound table per account; a replaced entry gets `account=None`
+  and `_persist` (deal/act only) also checks `_by_account[acct] == ent.tid`. Sign-in checks
+  are rate-limited per IP (`AUTH_LIMIT`); npone tokens are one-time nonces. The unit's only
   writable path is `data/` (`ReadWritePaths`). Guests are never stored, and the client no
   longer resumes them from localStorage. Tests fake introspect (`accounts` fixture in
   `test_server.py`). The e2e check used a throwaway npone-site on :8096 whose

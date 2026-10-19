@@ -74,7 +74,7 @@ account id and the profile name; poker never sees an email. For them:
   after a reload, on another device, or after a server restart, as it stood before any
   unfinished hand.
 - **Leaderboard.** Lifetime chips won, hands, sessions, tables won and best pot. Only
-  **ranked** settings count: 100 chips, blinds 1/2. Other settings are practice (saved, not
+  **ranked** settings count: 4 players, 100 chips, blinds 1/2. Other settings are practice (saved, not
   counted). Names are npone.dev profile names, or `Player xxxx` when none is set.
 - **No escaping a losing hand.** If you start a new game, or leave mid-hand until the table
   is evicted, the chips you had in the pot count as lost. A hand cut short by a server restart

@@ -819,7 +819,7 @@ function renderAccount() {
     chip.title = "Signed in with npone.dev: your table and stats are kept";
     chip.addEventListener("click", openBoard);
     a.append(chip);
-    $("setup-note").textContent = "Signed in as " + me.name + ". 100 chips with blinds 1/2 is ranked; "
+    $("setup-note").textContent = "Signed in as " + me.name + ". 4 players, 100 chips, blinds 1/2 is ranked; "
       + "other settings are practice. Your table is saved between hands.";
   } else {
     a.append(el("span", "muted", "Guest · "));
@@ -871,7 +871,7 @@ async function openBoard() {
     you.append(el("span", "", AUTH ? "Playing as a guest. Sign in at npone.dev to keep your progress and appear here." : "Playing as a guest."));
   }
   const rs = b.ranked_settings;
-  $("lb-note").textContent = `Counts every finished hand at the ranked settings (${rs.stack} chips, blinds ${rs.sb}/${rs.bb}), `
+  $("lb-note").textContent = `Counts every finished hand at the ranked settings (${rs.players} players, ${rs.stack} chips, blinds ${rs.sb}/${rs.bb}), `
     + "across all your sessions. Leaving a hand you're in counts as folding it.";
   renderAccount();
   if (!$("leaderboard").open) $("leaderboard").showModal();
@@ -980,8 +980,10 @@ $("lb-close").addEventListener("click", () => $("leaderboard").close());
 $("leaderboard").addEventListener("close", () => { if (cur && !busy && !$("table-view").hidden) render(); });
 $("leaderboard").addEventListener("click", (e) => { if (e.target === $("leaderboard")) $("leaderboard").close(); });
 // signed in at npone.dev in another tab? pick it up when they come back (the next game counts)
+let lastAuthCheck = 0;
 document.addEventListener("visibilitychange", async () => {
-  if (document.hidden || me || !AUTH) return;
+  if (document.hidden || me || !AUTH || Date.now() - lastAuthCheck < 30000) return;
+  lastAuthCheck = Date.now();
   const t = await authToken();
   if (!t) return;
   try { me = (await api("leaderboard", { token: t.token })).you; } catch { return; }
