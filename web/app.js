@@ -6,6 +6,7 @@ const API = "api/v1";
 const STORE_KEY = "poker.table";
 const ODDS_KEY = "poker.odds";
 const SOUND_KEY = "poker.sound";           // "0" = muted
+const VOLUME_KEY = "poker.volume";         // 0-100
 const NEXT_KEY = "poker.next";             // auto-deal countdown, seconds; "0" = deal by hand
 const SUIT = { c: "♣", d: "♦", h: "♥", s: "♠" };
 const DELAY = { think: 340, action: 320, street: 600, chip: 320, showdown: 900 };
@@ -90,6 +91,7 @@ function tween(node, to, fmt = String) {
 }
 
 // ── sound: synthesized with Web Audio, no files to load ──────────────────
+const gainFor = (v) => 0.9 * (v / 100) ** 2;          // squared: the slider feels even to the ear
 const sfx = (() => {
   let ctx = null, master = null, noiseBuf = null;
   function ready() {
@@ -99,7 +101,7 @@ const sfx = (() => {
       if (!AC) return false;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.55;
+      master.gain.value = gainFor($("volume").value);
       master.connect(ctx.destination);
     }
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
@@ -150,6 +152,7 @@ const sfx = (() => {
       const t = at(0), notes = big ? [523.25, 659.25, 783.99, 1046.5, 1318.5] : [659.25, 987.77];
       notes.forEach((f, i) => { tone(t + i * 0.11, f, "triangle", big ? 0.28 : 0.18, big ? 0.9 : 0.6); tone(t + i * 0.11, f * 2, "sine", 0.06, 0.4); });
     },
+    volume(v) { if (master) master.gain.setTargetAtTime(gainFor(v), ctx.currentTime, 0.03); },
     unlock() { if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {}); },
   };
 })();
@@ -770,7 +773,18 @@ $("raise-amount").addEventListener("keydown", (e) => { if (e.key === "Enter") { 
 document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => preset(b.dataset.preset)));
 $("odds-toggle").checked = load(ODDS_KEY) === "1";
 $("sound-toggle").checked = load(SOUND_KEY) !== "0";
-$("sound-toggle").addEventListener("change", (e) => { save(SOUND_KEY, e.target.checked ? null : "0"); if (e.target.checked) sfx.chips(0); });
+$("sound-toggle").addEventListener("change", (e) => {
+  save(SOUND_KEY, e.target.checked ? null : "0");
+  $("volume").disabled = !e.target.checked;
+  if (e.target.checked) sfx.chips(0);
+});
+{
+  const v = parseInt(load(VOLUME_KEY), 10);
+  if (v >= 0 && v <= 100) $("volume").value = v;
+  $("volume").disabled = !$("sound-toggle").checked;
+}
+$("volume").addEventListener("input", (e) => { sfx.volume(e.target.value); save(VOLUME_KEY, e.target.value); });
+$("volume").addEventListener("change", () => sfx.chips(0));            // a sample at the new level
 addEventListener("pointerdown", sfx.unlock);           // browsers start audio only after a gesture
 addEventListener("keydown", sfx.unlock);
 $("next-secs").value = [...$("next-secs").options].some((o) => o.value === load(NEXT_KEY)) ? load(NEXT_KEY) : "4";
