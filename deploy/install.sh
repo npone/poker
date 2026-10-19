@@ -11,8 +11,9 @@ PORT=8094
 HOST=poker.npone.dev
 CFG=/etc/cloudflared/config.yml
 
-# 1. The service (data/ holds signed-in players' saved tables and stats: the one writable path)
-install -d -o nliu -g nliu -m 0700 "$HERE/../data"
+# 1. The service (/srv/npone/poker holds signed-in players' saved tables and stats: the one writable path)
+install -d -m 0755 /srv/npone
+install -d -o nliu -g nliu -m 0700 /srv/npone/poker
 install -m 0644 "$HERE/poker.service" /etc/systemd/system/poker.service
 systemctl daemon-reload
 systemctl enable poker
