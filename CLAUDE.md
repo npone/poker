@@ -66,7 +66,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 ```bash
 cd /home/nliu/dev/poker/src
 
-# Tests — 47 passed in ~8s  ✅  (also the .taskhub.json `test` command)
+# Tests — 48 passed in ~8s  ✅  (also the .taskhub.json `test` command)
 python -m pytest -q
 
 # Web game locally
@@ -84,7 +84,7 @@ python demo_ascii.py   # legacy: ASCII-rendered deal + score (needs numpy)
 python test.py         # legacy scratch: prints ASCII cards only
 ```
 
-Breakdown of the 47: **21** in `test_engine.py`, **7** in `test_server.py`, **6** in
+Breakdown of the 48: **21** in `test_engine.py`, **8** in `test_server.py`, **6** in
 `test_table.py`, **5** in `test_odds.py`, **4** each in `test_evaluator.py` and `test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
 ASCII cards at import).
 
@@ -176,6 +176,9 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   422 handler that never echoes input (the default one 500s on NaN/Infinity).
 - Browser check: Playwright does not support Ubuntu 20.04, so run it from the
   `mcr.microsoft.com/playwright/python:v1.55.0-noble` image with `--network host`.
+- Cloudflare's edge caches static files (4 h). `server.py` sends `Cache-Control: no-cache` on
+  every non-API path so new deploys revalidate; `index.html` also carries `?v=N` on `app.js` /
+  `style.css` — bump it if a deploy ever still shows old assets.
 - **Deployed from this checkout.** `poker.service` runs `src/` in place, so whatever is checked
   out is what restarts. Keep `master` checked out here; `sudo systemctl restart poker` after a
   merge. A restart drops every in-progress table (memory only).

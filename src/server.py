@@ -157,5 +157,14 @@ def table_odds(tid: str, raise_to: int | None = Query(None, ge=0, le=10_000_000)
     return _call(tid, lambda t: t.odds(raise_to))
 
 
+@app.middleware("http")
+async def _revalidate_web(request: Request, call_next):
+    # Cloudflare's edge otherwise keeps app.js/style.css for hours after a deploy
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 if WEB_DIR.is_dir():
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
