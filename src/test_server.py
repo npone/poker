@@ -47,6 +47,16 @@ def test_errors_are_4xx():
         assert r.status_code == 400
 
 
+def test_odds_endpoint():
+    tid = _new(players=3)["id"]
+    assert client.get(f"/api/v1/tables/{tid}/odds").status_code == 400      # no hand yet
+    s = client.post(f"/api/v1/tables/{tid}/deal").json()
+    while not s["to_act"]:
+        s = client.post(f"/api/v1/tables/{tid}/deal").json()
+    o = client.get(f"/api/v1/tables/{tid}/odds").json()
+    assert {"pot_odds", "equity", "outs", "opponents", "to_call"} <= set(o)
+
+
 def test_health_and_web_client_served():
     assert client.get("/api/v1/health").json()["ok"]
     r = client.get("/")
