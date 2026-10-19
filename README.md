@@ -49,6 +49,8 @@ uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
 | `GET /api/v1/tables/{id}` | current `state` |
 | `POST /api/v1/tables/{id}/deal` | start the next hand → `state` |
 | `POST /api/v1/tables/{id}/act` `{action, amount?}` | `fold` `check` `call` `raise` (`amount` = total street bet) `allin` → `state` |
+| `POST /api/v1/session` `{token}` | signed in: your stats, and your table (live, or restored from the last save) → `{account, table?, state?, ranked?}` |
+| `POST /api/v1/leaderboard` `{token?}` | top players by ranked chips won, plus your row when signed in |
 | `GET /api/v1/tables/{id}/hands` | finished hands kept for replay (last 50): `hand_no`, your `net`, `pot`, `winners`, `showdown` |
 | `GET /api/v1/tables/{id}/hands/{n}` | one hand as you saw it: start stacks, your `hole`, the full `events` log (bots' cards only where shown) |
 | `GET /api/v1/tables/{id}/odds` | on your turn only: `pot_odds`, `equity` (vs the hands still in), `opponents`, `made`, `outs` — the odds helper's numbers |
@@ -59,6 +61,24 @@ cards only when shown at showdown), board, pot, `to_act` (your legal options, or
 are 400 (illegal now), 404 (unknown/expired table), 422 (malformed), 429 (too many new tables
 from one client: 20 per 10 min) or 503 (server full). Interactive docs at
 `/api/docs`. Tables live in server memory: a restart ends them.
+
+## Accounts, progress and the leaderboard
+
+Guests play without an account. Nothing is saved, and a reload starts a new game. Signed-in
+players use their **npone.dev account**. The page fetches a 5-minute token from
+`https://npone.dev/auth/token?aud=poker` and sends it with `POST /api/v1/tables` or
+`/session`. The server checks it at npone.dev's `/auth/introspect`, which returns an opaque
+account id and the profile name; poker never sees an email. For them:
+
+- **Progress is kept.** Their table is saved between hands (`data/poker.db`) and comes back
+  after a reload, on another device, or after a server restart, as it stood before any
+  unfinished hand.
+- **Leaderboard.** Lifetime chips won, hands, sessions, tables won and best pot. Only
+  **ranked** settings count: 100 chips, blinds 1/2. Other settings are practice (saved, not
+  counted). Names are npone.dev profile names, or `Player xxxx` when none is set.
+- **No escaping a losing hand.** If you start a new game, or leave mid-hand until the table
+  is evicted, the chips you had in the pot count as lost. A hand cut short by a server restart
+  is void.
 
 ## Deploy (dev176)
 
