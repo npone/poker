@@ -5,8 +5,9 @@
 const API = "api/v1";
 const STORE_KEY = "poker.table";
 const ODDS_KEY = "poker.odds";
+const NEXT_KEY = "poker.next";             // auto-deal countdown, seconds; "0" = deal by hand
 const SUIT = { c: "♣", d: "♦", h: "♥", s: "♠" };
-const DELAY = { think: 340, action: 320, street: 600, chip: 320, showdown: 900, next: 4000 };
+const DELAY = { think: 340, action: 320, street: 600, chip: 320, showdown: 900 };
 const motionQuery = matchMedia("(prefers-reduced-motion: reduce)");
 const reduced = () => motionQuery.matches;
 
@@ -14,8 +15,10 @@ const $ = (id) => document.getElementById(id);
 let tid = null;          // table id: the only credential for our seat
 let cur = null;          // last server snapshot
 let busy = false;        // replaying events or waiting on the server
-let disp = null;         // what the felt shows mid-replay: {stacks, bets, board, pot, say, folded}
-let seatEls = [];        // per seat: {root, cards, plate, name, style, stack, say, bet}
+let disp = null;         // what the felt shows mid-replay: {stacks, bets, board, pot, folded}
+let said = {};           // each seat's last move this street (stays up until the street ends)
+let lastActor = null;    // whose move is newest, highlighted
+let seatEls = [];        // per seat: {root, cards, plate, name, stack, say, bet}
 let nextTimer = null;    // pending auto-deal
 let held = false;        // the player paused auto-deal
 let oddsCache = { key: null, data: null };
@@ -186,9 +189,8 @@ function buildSeats(state) {
   seatEls = state.players.map((p) => {
     const root = el("div", "seat" + (p.seat === state.hero ? " hero" : ""));
     const say = el("div", "say"), cards = el("div", "cards"), plate = el("div", "plate");
-    const nm = el("div", "name"), sty = el("span", "style"), stack = el("div", "stack");
+    const nm = el("div", "name"), stack = el("div", "stack");
     plate.append(nm, stack);
-    if (p.style) { sty.textContent = p.style; sty.dataset.style = p.style; plate.append(sty); }
     root.append(say, cards, plate);
     const bet = el("div", "bet");
     bet.append(el("span", "chip-ico"), el("span", "amt"));
@@ -236,9 +238,10 @@ function updateSeats(state, { acting = null, thinking = false, winners = [] } = 
     const bet = disp ? disp.bets[p.seat] : p.street_bet;
     s.bet.classList.toggle("show", !!bet);
     if (bet) tween(s.bet.lastChild, bet); else s.bet.lastChild._v = undefined;
-    const said = thinking && acting === p.seat ? "" : (disp && disp.say[p.seat]) || "";
-    s.say.classList.toggle("show", !!said);
-    if (said) s.say.textContent = said;
+    const words = thinking && acting === p.seat ? "" : said[p.seat] || "";
+    s.say.classList.toggle("show", !!words);
+    s.say.classList.toggle("latest", lastActor === p.seat);
+    if (words) s.say.textContent = words;
     setCards(s.cards, holeCodes(p), { order: p.seat });
   }
   positionSeats(state);
@@ -306,15 +309,24 @@ function showWinner(result, state) {
 
 function hideWinner() { $("winner").hidden = true; $("felt").classList.remove("result"); }
 
+const nextMs = () => +$("next-secs").value * 1000;
+
 function scheduleNext() {
   if (nextTimer || held || busy) return;
-  const ring = $("next-ring");
+  const ring = $("next-ring"), ms = nextMs();
   ring.style.animation = "none";
+  $("next").classList.toggle("manual", !ms);
+  $("btn-now").textContent = ms ? "Deal now" : "Deal next hand";
+  if (!ms) {                                          // countdown off: wait for the player
+    $("next-label").textContent = "Ready when you are";
+    return;
+  }
   void ring.getBoundingClientRect();                 // restart the countdown animation
-  ring.style.animation = `ring ${DELAY.next}ms linear forwards`;
+  ring.style.setProperty("--next-ms", ms + "ms");
+  ring.style.animation = `ring ${ms}ms linear forwards`;
   $("next-label").textContent = "Next hand…";
   $("btn-hold").textContent = "Hold";
-  nextTimer = setTimeout(() => { nextTimer = null; dealOrRestart(); }, DELAY.next);
+  nextTimer = setTimeout(() => { nextTimer = null; dealOrRestart(); }, ms);
 }
 
 function cancelNext() { clearTimeout(nextTimer); nextTimer = null; }
@@ -344,14 +356,15 @@ async function replay(state) {
   if (!disp) {
     const base = prev && prev.in_hand ? prev : state;
     disp = { stacks: base.players.map((p) => p.stack), bets: base.players.map((p) => p.street_bet),
-             board: [...base.board], pot: base.pot, say: {},
+             board: [...base.board], pot: base.pot,
              folded: Object.fromEntries(((prev && prev.players) || []).map((p) => [p.seat, p.folded])) };
   }
   for (const ev of state.events) {
     if (ev.type === "hand") {
       hideWinner();
       disp = { stacks: (prev || state).players.map((p) => p.stack), bets: state.players.map(() => 0),
-               board: [], pot: 0, say: {}, folded: {}, noCards: true };
+               board: [], pot: 0, folded: {}, noCards: true };
+      said = {}; lastActor = null;
       for (const s of seatEls) { s.cards.replaceChildren(); s.cards.dataset.key = ""; }
       $("board").replaceChildren(); $("board").dataset.key = "";
       log(`Hand ${ev.hand_no} — ${name(ev.button)} has the button`, "street");
@@ -361,7 +374,7 @@ async function replay(state) {
       await sleep(250);
     } else if (ev.type === "street") {
       if (ev.street !== "preflop") await gatherBets();
-      disp.say = {};
+      said = {}; lastActor = null;
       if (ev.street === "preflop") {                     // blinds go out, then the cards
         disp.stacks = ev.stacks;
         updateSeats(state);
@@ -388,14 +401,15 @@ async function replay(state) {
       }
       disp.stacks[ev.seat] = ev.stack; disp.bets[ev.seat] = ev.street_bet; disp.pot = ev.pot;
       if (ev.action === "fold") disp.folded[ev.seat] = true;
-      disp.say = { [ev.seat]: describe(ev, true) };
+      said[ev.seat] = describe(ev, true);
+      lastActor = ev.seat;
       log(describe(ev));
       updateCenter(disp.board, disp.pot);
       updateSeats(state, { acting: ev.seat });
       await sleep(bot ? DELAY.action * pace : 120);
     } else if (ev.type === "result") {
       await gatherBets();
-      disp.say = {};
+      lastActor = null;
       if (ev.showdown) {
         disp.revealed = true;
         updateSeats(state);
@@ -494,7 +508,6 @@ async function renderOdds() {
   const s = cur, a = s && s.to_act;
   const panel = $("odds");
   panel.hidden = !oddsOn();
-  panel.parentElement.classList.toggle("with-odds", oddsOn());
   panel.classList.toggle("idle", !a || busy);
   if (!oddsOn()) return;
   if (!a || busy) {                                    // keep its place; nothing to decide yet
@@ -677,6 +690,11 @@ $("raise-amount").addEventListener("input", (e) => { $("raise-range").value = e.
 $("raise-amount").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); raise(); } });
 document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => preset(b.dataset.preset)));
 $("odds-toggle").checked = load(ODDS_KEY) === "1";
+$("next-secs").value = [...$("next-secs").options].some((o) => o.value === load(NEXT_KEY)) ? load(NEXT_KEY) : "4";
+$("next-secs").addEventListener("change", (e) => {
+  save(NEXT_KEY, e.target.value);
+  if (!$("winner").hidden && !held) { cancelNext(); scheduleNext(); }   // apply to this countdown
+});
 $("odds-toggle").addEventListener("change", (e) => { save(ODDS_KEY, e.target.checked ? "1" : null); if (cur) renderOdds(); });
 addEventListener("resize", () => { if (cur && seatEls.length) positionSeats(cur); });
 
