@@ -19,7 +19,7 @@ def test_play_a_session_over_http():
     body = _new(players=3, stack=40)
     tid, s = body["id"], body["state"]
     assert s["hand_no"] == 0 and not s["in_hand"]
-    for _ in range(200):
+    for _ in range(3000):                        # equity bots are careful; games run long
         if s["game_over"]:
             break
         s = client.post(f"/api/v1/tables/{tid}/deal").json()
@@ -55,6 +55,19 @@ def test_odds_endpoint():
         s = client.post(f"/api/v1/tables/{tid}/deal").json()
     o = client.get(f"/api/v1/tables/{tid}/odds").json()
     assert {"pot_odds", "equity", "outs", "opponents", "to_call"} <= set(o)
+
+
+def test_hand_history_endpoints():
+    tid = _new(players=3)["id"]
+    assert client.get(f"/api/v1/tables/{tid}/hands").json() == []
+    s = client.post(f"/api/v1/tables/{tid}/deal").json()
+    while s["in_hand"]:
+        s = client.post(f"/api/v1/tables/{tid}/act", json={"action": "fold"}).json()
+    hands = client.get(f"/api/v1/tables/{tid}/hands").json()
+    assert [h["hand_no"] for h in hands] == [1]
+    rec = client.get(f"/api/v1/tables/{tid}/hands/1").json()
+    assert rec["hole"] and rec["events"][-1]["type"] == "result"
+    assert client.get(f"/api/v1/tables/{tid}/hands/2").status_code == 404
 
 
 def test_web_files_revalidate():

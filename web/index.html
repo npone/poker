@@ -7,7 +7,7 @@
 <meta name="description" content="No-Limit Texas Hold'em against bots.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/@fontsource/michroma@5.3.0/files/michroma-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <main id="app">
@@ -77,6 +77,7 @@
               <button id="btn-hold" class="small" type="button">Hold</button>
             </div>
             <button id="btn-again" class="primary" type="button" hidden>Play again</button>
+            <button id="btn-replay" class="link" type="button">↺ Replay this hand</button>
           </div>
         </div>
       </div>
@@ -110,6 +111,7 @@
         <h3>Odds helper</h3>
         <div id="odds-body"></div>
       </aside>
+      <button id="btn-history" type="button" disabled>Hand history <kbd>H</kbd></button>
       <details id="log-box" class="log-box" open>
         <summary>Hand log</summary>
         <ol id="log"></ol>
@@ -117,7 +119,34 @@
      </div>
     </div>
   </section>
+
+  <dialog id="history" class="history" aria-labelledby="hist-title">
+    <div class="hist-head">
+      <h2 id="hist-title">Hand history</h2>
+      <select id="hist-pick" aria-label="Choose a hand"></select>
+      <button id="hist-close" class="small" type="button">Close <kbd>Esc</kbd></button>
+    </div>
+    <div class="hist-body">
+      <div class="hist-stage">
+        <div class="hist-felt">
+          <div id="hist-board" class="board" aria-label="Board"></div>
+          <div id="hist-pot" class="pot show"><span class="chip-ico" aria-hidden="true"></span><span></span></div>
+        </div>
+        <div id="hist-seats" class="hist-seats"></div>
+        <p id="hist-caption" class="hist-caption" aria-live="polite"></p>
+        <div class="hist-controls">
+          <button id="hist-first" class="small" type="button" title="Start (Home)" aria-label="Start">⏮</button>
+          <button id="hist-prev" class="small" type="button" title="Back (←)" aria-label="Back">◀</button>
+          <button id="hist-play" class="small primary" type="button" title="Play / pause (Space)">▶ Play</button>
+          <button id="hist-next" class="small" type="button" title="Forward (→)" aria-label="Forward">▶</button>
+          <button id="hist-last" class="small" type="button" title="End (End)" aria-label="End">⏭</button>
+          <input id="hist-scrub" type="range" min="0" value="0" aria-label="Step through the hand">
+        </div>
+      </div>
+      <ol id="hist-steps" class="hist-steps"></ol>
+    </div>
+  </dialog>
 </main>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

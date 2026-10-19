@@ -381,6 +381,73 @@ input[type="number"] {
 .between button { min-width: 240px; }
 
 .log-box { margin: 0 0 32px; font-size: 13px; }
+#btn-history { justify-self: start; min-height: 38px; padding: 6px 14px; font-size: 13px; }
+button.link {
+  --b: transparent; background: none; border: 0; box-shadow: none; text-shadow: none; min-height: 0;
+  color: #c9d1cd; font-size: 13px; padding: 6px 4px 0; text-decoration: underline; text-underline-offset: 3px;
+}
+button.link:hover { color: #fff; }
+
+/* ── hand history replay ──────────────────────────────────────────────── */
+.history {
+  width: min(980px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 0;
+  border: 1px solid rgba(255,255,255,.14); border-radius: 18px; color: #eef3f0; overflow: hidden;
+  background: var(--noise), linear-gradient(180deg, #1e2321, #121514);
+  box-shadow: 0 30px 80px -20px rgba(0,0,0,.8);
+}
+.history[open] { display: flex; flex-direction: column; animation: pop-in .3s cubic-bezier(.2,.9,.3,1.2); }
+.history::backdrop { background: rgba(5,8,7,.6); backdrop-filter: blur(3px); }
+.hist-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+.hist-head h2 { margin: 0; font: italic 800 20px Georgia, serif; color: var(--gold); flex: 1; }
+.hist-head select {
+  font: inherit; font-size: 13px; color: #eef3f0; background: #2a302d; border: 1px solid rgba(255,255,255,.15);
+  border-radius: 9px; padding: 6px 8px; min-height: 36px; max-width: 100%;
+}
+.hist-body { display: grid; grid-template-columns: minmax(0, 1fr) 250px; min-height: 0; overflow: hidden; }
+.hist-stage { padding: 16px; overflow: auto; }
+.hist-felt {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border-radius: 999px;
+  background: var(--noise), radial-gradient(ellipse at 50% 40%, var(--felt-hi), var(--felt) 70%);
+  border: 8px solid var(--wood); box-shadow: inset 0 0 30px rgba(0,0,0,.45); min-height: 120px; justify-content: center;
+}
+.hist-seats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 14px 0 6px; }
+.hseat {
+  display: grid; justify-items: center; gap: 4px; padding: 8px 6px; border-radius: 12px; text-align: center;
+  background: linear-gradient(180deg, #2c322f, #1a1e1c); border: 2px solid rgba(255,255,255,.08);
+  transition: border-color .2s, opacity .2s;
+}
+.hseat .cards { display: flex; gap: 3px; min-height: 46px; }
+.hseat .pcard { width: 33px; height: 46px; }
+.hseat .pcard .r, .hseat .pcard .s { font-size: 15px; }
+.hseat .pcard .pip { display: none; }
+.hname { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 5px; }
+.hdealer { width: 17px; height: 17px; border-radius: 50%; background: #eee; color: #222; font: 800 10px/17px system-ui; }
+.hstack { font-size: 12px; color: #c9d1cd; font-variant-numeric: tabular-nums; }
+.hsay { font-size: 12px; font-weight: 700; min-height: 1.3em; color: #c9d1cd; }
+.hsay.latest { color: #2a2000; background: var(--gold); border-radius: 6px; padding: 0 6px; }
+.hseat.folded { opacity: .45; }
+.hseat.acting { border-color: rgba(245,197,66,.7); }
+.hseat.winner { border-color: var(--gold); box-shadow: 0 0 14px rgba(245,197,66,.45); }
+.hseat.winner .hsay { color: var(--gold); }
+.hist-caption { text-align: center; font-weight: 700; font-size: 15px; min-height: 1.4em; margin: 10px 0; }
+.hist-controls { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.hist-controls button { min-width: 40px; }
+#hist-scrub { flex: 1 1 160px; accent-color: var(--gold); }
+.hist-steps {
+  margin: 0; padding: 12px 12px 12px 34px; overflow: auto; font-size: 13px;
+  border-left: 1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.18);
+}
+.hist-steps li { padding: 3px 6px; border-radius: 6px; cursor: pointer; color: #c9d1cd; }
+.hist-steps li:hover { background: rgba(255,255,255,.06); }
+.hist-steps li.street, .hist-steps li.hand { color: #8f9a95; font-weight: 700; margin-top: 4px; }
+.hist-steps li.result { color: var(--gold); font-weight: 700; }
+.hist-steps li.current { background: rgba(245,197,66,.18); color: #fff; }
+@keyframes pop-in { from { transform: scale(.94); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (max-width: 700px) {
+  .hist-body { grid-template-columns: 1fr; overflow: auto; }
+  .hist-steps { border-left: 0; border-top: 1px solid rgba(255,255,255,.08); max-height: 220px; }
+  .hist-seats { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+}
 .log-box summary { cursor: pointer; color: var(--muted); }
 #log { max-height: 260px; overflow: auto; padding-left: 20px; margin: 8px 0; }
 #log li { margin: 2px 0; }
