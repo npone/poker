@@ -202,7 +202,7 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   localStorage `poker.next`); each seat's last move stays up until the street ends, newest in
   gold; bot styles hidden; a fixed side column (odds helper + hand log) so toggling the odds
   helper never moves the table.
-  Then: synthesized sound effects (Web Audio, no files; `sfx` in `app.js`; Sound toggle or `M`,
+  Then: synthesized sound effects (Web Audio, no files; `sfx` in `app.js`; Sound toggle or `M`, volume slider `poker.volume`,
   per-viewer `poker.sound`) for cards, chips, checks and the winner; a styled title with the
   npone wordmark linking back to https://npone.dev, as every npone.dev page has (Ning).
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence

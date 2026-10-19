@@ -123,6 +123,9 @@ button.danger { --b: var(--danger); --ink: #fff; }
 button.ghost { --b: transparent; background: transparent; box-shadow: none; border-color: var(--line); text-shadow: none; }
 button.small { min-height: 34px; padding: 5px 12px; font-size: 13px; border-radius: 10px; }
 
+.sound { display: inline-flex; align-items: center; gap: 8px; }
+#volume { width: 84px; accent-color: var(--primary); cursor: pointer; }
+#volume:disabled { opacity: .4; cursor: default; }
 .setting { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .setting select {
   font: inherit; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
