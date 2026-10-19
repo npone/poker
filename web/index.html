@@ -165,8 +165,8 @@
     </div>
   </dialog>
 </main>
-<!-- data-wide: the footer spans the page, lined up with this full-width header -->
-<style>:root{--np-gutter:16px}</style>
+<!-- data-wide + --np-max: the footer lines up with #app (max 1300px, 1000px under 1060px; body has the 16px sides) -->
+<style>:root{--np-gutter:0px;--np-max:1300px}@media (max-width:1060px){:root{--np-max:1000px}}</style>
 <script src="https://npone.dev/footer.js" data-wide></script>
 <script src="app.js?v=15"></script>
 </body>
