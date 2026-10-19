@@ -825,15 +825,7 @@ function renderAccount() {
     $("setup-note").textContent = "Signed in as " + me.name + ". 4 players, 100 chips, blinds 1/2 is ranked; "
       + "other settings are practice. Your table is saved between hands.";
   } else {
-    a.append(el("span", "muted", "Guest · "));
-    if (AUTH) {
-      const link = el("a", "", "Sign in");
-      link.href = `${AUTH}/login`;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.title = `Sign in at ${AUTH_HOST} to keep your progress and join the leaderboard`;
-      a.append(link);
-    }
+    // Guest · Sign in is shown by the shared npone.dev bar (header.js).
     $("setup-note").textContent = "Playing as a guest: nothing is saved, and a reload starts fresh."
       + (AUTH ? ` Sign in at ${AUTH_HOST} to keep your progress and get on the leaderboard.` : "");
   }
