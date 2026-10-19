@@ -15,12 +15,14 @@ snapshot unless they were shown at showdown.
 from __future__ import annotations
 
 import random
+from collections import deque
 
 import engine as e
 import odds
 from bots import BOT_NAMES, make_bot
 
 HERO = 0
+HISTORY = 50                                    # finished hands kept per table, for replay
 ACTIONS = ("fold", "check", "call", "raise", "allin")
 
 
@@ -50,6 +52,8 @@ class Table:
         self._view = None                            # hero's pending decision view
         self.result = None                           # last finished hand's summary
         self._events: list[dict] = []
+        self.history: deque[dict] = deque(maxlen=HISTORY)
+        self._rec = None                             # the hand being recorded for history
         self._odds = (None, None)                    # (decision view, its odds): one per decision
         self.game.on_action = self._on_action
         self.game.on_street = self._on_street
@@ -64,7 +68,7 @@ class Table:
             self._bet_open = True
         elif kind == "call" and p.stack == 0:
             kind = "allin"
-        self._events.append({"type": "action", "seat": p.seat, "action": kind,
+        self._emit({"type": "action", "seat": p.seat, "action": kind,
                              "chips": chips, "street_bet": p.street_bet, "stack": p.stack,
                              "pot": self.game.pot_total()})
 
@@ -72,7 +76,7 @@ class Table:
         self.street = street
         self._bet_open = street == "preflop"          # the big blind is the opening bet
         ps = self.game.players                        # preflop: blinds are already posted
-        self._events.append({"type": "street", "street": street,
+        self._emit({"type": "street", "street": street,
                              "board": [_card(c) for c in board],
                              "stacks": [p.stack for p in ps],
                              "bets": [p.street_bet if street == "preflop" else 0 for p in ps],
@@ -98,8 +102,11 @@ class Table:
         self.hand_no += 1
         self.result = None
         self._hand = self.game.hand()
-        self._events.append({"type": "hand", "hand_no": self.hand_no,
-                             "button": self.game.button})
+        self._rec = {"hand_no": self.hand_no, "button": self.game.button, "hole": None,
+                     "players": [{"seat": p.seat, "name": self.names[p.seat], "stack": p.stack}
+                                 for p in self.game.players],
+                     "events": []}
+        self._emit({"type": "hand", "hand_no": self.hand_no, "button": self.game.button})
         self._run(None)
         return self.state()
 
@@ -135,7 +142,10 @@ class Table:
             self._hand = None
             self._view = None
             self.result = self._summarize(done.value)
-            self._events.append({"type": "result", **self.result})
+            self._emit({"type": "result", **self.result})
+            self._rec["hole"] = [_card(c) for c in done.value["holes"][HERO]]
+            self.history.append(self._rec)
+            self._rec = None
         except BaseException:
             # a bug must not wedge the table: void the hand (everyone gets back what they put
             # in) so the next deal() still works, then let the error surface
@@ -144,7 +154,30 @@ class Table:
                 p.contributed = p.street_bet = 0
             self._hand = None
             self._view = None
+            self._rec = None                         # a voided hand isn't history
             raise
+
+    def _emit(self, ev: dict):
+        self._events.append(ev)
+        if self._rec is not None:
+            self._rec["events"].append(ev)
+
+    # -- hand history ----------------------------------------------------------
+    def hands(self) -> list[dict]:
+        """One line per finished hand still kept (oldest first), for a history list."""
+        out = []
+        for r in self.history:
+            res = r["events"][-1]
+            out.append({"hand_no": r["hand_no"], "net": res["net"][HERO],
+                        "pot": sum(p["amount"] for p in res["pots"]),
+                        "winners": sorted({w for p in res["pots"] for w in p["winners"]}),
+                        "showdown": res["showdown"]})
+        return out
+
+    def hand_record(self, hand_no: int) -> dict | None:
+        """A finished hand as the hero saw it: start stacks, the hero's cards, and the event log
+        (bots' cards only where shown at showdown). None if unknown or no longer kept."""
+        return next((r for r in self.history if r["hand_no"] == hand_no), None)
 
     def _summarize(self, res: dict) -> dict:
         board = res["board"]

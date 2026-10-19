@@ -126,3 +126,44 @@ def test_events_narrate_the_hand():
     s = t.act("fold") if s["in_hand"] else s
     assert s["events"][-1]["type"] == "result"
     assert t.state()["events"] == []                  # events are delivered once
+
+
+def test_hand_history_records_what_the_hero_saw():
+    rng = random.Random(9)
+    t = Table(players=4, stack=200, seed=9)
+    shown_any = False
+    for _ in range(60):
+        if t.game_over:
+            break
+        s = t.deal()
+        while s["in_hand"]:
+            s = _hero_random(t, s, rng)
+        rec = t.hand_record(s["hand_no"])
+        assert rec["hole"] and len(rec["hole"]) == 2
+        assert [p["stack"] for p in rec["players"]] == [st - n for st, n in zip(
+            [p["stack"] for p in s["players"]], s["result"]["net"])]       # start stacks
+        kinds = [ev["type"] for ev in rec["events"]]
+        assert kinds[0] == "hand" and kinds[-1] == "result" and "street" in kinds
+        res = rec["events"][-1]
+        # no bot's hole cards anywhere except the ones shown at showdown
+        text = json.dumps(rec["events"])
+        for p in t.game.players[1:]:
+            if p.hole and p.seat not in res["shown"]:
+                assert not all(repr(c) in text for c in p.hole) or res["showdown"]
+        shown_any |= bool(res["shown"])
+    assert shown_any
+    hands = t.hands()
+    assert [h["hand_no"] for h in hands] == [r["hand_no"] for r in t.history]
+    assert sum(h["net"] for h in hands) == sum(r["events"][-1]["net"][0] for r in t.history)
+    assert t.hand_record(10_000) is None
+
+
+def test_history_keeps_only_the_last_hands():
+    import table
+    t = Table(players=2, stack=10_000, sb=1, bb=2, seed=1)
+    for _ in range(table.HISTORY + 5):
+        s = t.deal()
+        while s["in_hand"]:
+            s = t.act("fold") if not s["to_act"]["can_check"] else t.act("check")
+    assert len(t.history) == table.HISTORY
+    assert t.history[0]["hand_no"] == 6 and t.hand_record(1) is None

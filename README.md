@@ -49,6 +49,8 @@ uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
 | `GET /api/v1/tables/{id}` | current `state` |
 | `POST /api/v1/tables/{id}/deal` | start the next hand → `state` |
 | `POST /api/v1/tables/{id}/act` `{action, amount?}` | `fold` `check` `call` `raise` (`amount` = total street bet) `allin` → `state` |
+| `GET /api/v1/tables/{id}/hands` | finished hands kept for replay (last 50): `hand_no`, your `net`, `pot`, `winners`, `showdown` |
+| `GET /api/v1/tables/{id}/hands/{n}` | one hand as you saw it: start stacks, your `hole`, the full `events` log (bots' cards only where shown) |
 | `GET /api/v1/tables/{id}/odds` | on your turn only: `pot_odds`, `equity` (vs the hands still in), `opponents`, `made`, `outs` — the odds helper's numbers |
 
 `state` is the view from your seat: players (stacks, bets, folded/all-in; other players' hole

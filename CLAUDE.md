@@ -66,7 +66,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 ```bash
 cd /home/nliu/dev/poker/src
 
-# Tests — 48 passed in ~8s  ✅  (also the .taskhub.json `test` command)
+# Tests — 51 passed in ~9s  ✅  (also the .taskhub.json `test` command)
 python -m pytest -q
 
 # Web game locally
@@ -84,7 +84,7 @@ python demo_ascii.py   # legacy: ASCII-rendered deal + score (needs numpy)
 python test.py         # legacy scratch: prints ASCII cards only
 ```
 
-Breakdown of the 48: **21** in `test_engine.py`, **8** in `test_server.py`, **6** in
+Breakdown of the 51: **21** in `test_engine.py`, **9** in `test_server.py`, **8** in
 `test_table.py`, **5** in `test_odds.py`, **4** each in `test_evaluator.py` and `test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
 ASCII cards at import).
 
@@ -205,6 +205,10 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   Then: synthesized sound effects (Web Audio, no files; `sfx` in `app.js`; Sound toggle or `M`, volume slider `poker.volume`,
   per-viewer `poker.sound`) for cards, chips, checks and the winner; a styled title with the
   npone wordmark linking back to https://npone.dev, as every npone.dev page has (Ning).
+  Hand history replay: `Table.history` keeps the last 50 finished hands as the hero saw them
+  (`hands()`, `hand_record(n)`, `GET …/hands[/{n}]`); the web `<dialog>` steps through one by
+  folding its events (H key, or "Replay this hand" on the end-of-hand overlay); auto-deal
+  waits while it is open.
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
   (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
 - `README.md` still claims nothing beyond what is true; it documents the API and deploy.

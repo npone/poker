@@ -9,6 +9,8 @@ same /api/v1 endpoints the web client does.
     POST /api/v1/tables/{id}/deal                                 -> state
     POST /api/v1/tables/{id}/act        {action, amount?}         -> state
     GET  /api/v1/tables/{id}/odds[?raise_to=N]  hero's pot odds, equity, EV, outs (hero's turn)
+    GET  /api/v1/tables/{id}/hands               finished hands kept for replay (last 50)
+    GET  /api/v1/tables/{id}/hands/{n}           one hand's record: stacks, your cards, events
     GET  /api/v1/health
 
 `state` is Table.state(); its `events` list holds what happened since the previous response.
@@ -164,6 +166,19 @@ async def _revalidate_web(request: Request, call_next):
     if not request.url.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+@app.get("/api/v1/tables/{tid}/hands")
+def table_hands(tid: str):
+    return _call(tid, lambda t: t.hands())
+
+
+@app.get("/api/v1/tables/{tid}/hands/{hand_no}")
+def table_hand(tid: str, hand_no: int):
+    rec = _call(tid, lambda t: t.hand_record(hand_no))
+    if rec is None:
+        raise HTTPException(404, "no such hand (only the last 50 are kept)")
+    return rec
 
 
 if WEB_DIR.is_dir():
