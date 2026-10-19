@@ -291,8 +291,11 @@ function buildSeats(state) {
 
 function positionSeats(state) {
   const pos = seatPositions(state.players.length, state.hero);
+  const feltW = $("felt").clientWidth;
   seatEls.forEach((s, i) => {
-    s.root.style.left = pos[i].left + "%";
+    // keep the whole seat over the table: centred on the rim, a side seat hung half off the page
+    const half = feltW ? (s.root.offsetWidth / 2 / feltW) * 100 : 0;
+    s.root.style.left = Math.min(Math.max(pos[i].left, half), 100 - half) + "%";
     s.root.style.top = pos[i].top + "%";
     s.bet.style.left = 50 + (pos[i].left - 50) * 0.58 + "%";
     s.bet.style.top = 50 + (pos[i].top - 50) * 0.5 + "%";
@@ -533,8 +536,11 @@ async function replay(state) {
 // ── main render from `cur` ───────────────────────────────────────────────
 function render() {
   const s = cur;
+  const appearing = $("table-view").hidden;
   $("setup").hidden = true;
   $("table-view").hidden = false;
+  // phones: until you scroll, the sticky action bar covers your own seat; bring the table up
+  if (appearing && matchMedia("(max-width: 640px)").matches) $("felt").scrollIntoView({ block: "start" });
   renderInfo();
   const winners = s.result && !s.in_hand ? [...new Set(s.result.pots.flatMap((p) => p.winners))] : [];
   updateSeats(s, { acting: s.to_act ? s.hero : null, winners });
