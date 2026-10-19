@@ -51,6 +51,7 @@ class Table:
         self._view = None                            # hero's pending decision view
         self.result = None                           # last finished hand's summary
         self._events: list[dict] = []
+        self._odds = (None, None)                    # (decision view, its odds): one per decision
         self.game.on_action = self._on_action
         self.game.on_street = self._on_street
 
@@ -163,21 +164,45 @@ class Table:
         return {"showdown": showdown, "shown": shown, "pots": pots,
                 "net": [a - b for a, b in zip(res["stacks"], res["stacks_before"])]}
 
-    def odds(self, sims: int = 2000) -> dict:
+    def odds(self, raise_to: int | None = None, sims: int = 1500) -> dict:
         """The hero's numbers for the decision in front of them: pot odds (the equity a call
-        needs), equity against the hands still in, and outs. Read-only: no events consumed."""
+        needs), equity against the hands still in, EV of calling, outs, and a verdict. With
+        `raise_to`, also the equity a caller would need against that raise. Computed once per
+        decision (repeat calls are cached); read-only, no events consumed."""
         if self._view is None:
             raise TableError("not your turn")
         v = self._view
-        hole, board = v["hole"], v["board"]
-        opp = sum(not f for f in v["folded"]) - 1
-        outs = odds.outs(hole, board)
-        return {"hand_no": self.hand_no, "street": v["street"], "to_call": v["to_call"],
-                "pot": v["pot"], "opponents": opp,
-                "pot_odds": round(odds.pot_odds(v["to_call"], v["pot"]), 4),
-                "equity": round(odds.equity(hole, board, opp, sims), 4),
+        if self._odds[0] is not v:
+            hole, board = v["hole"], v["board"]
+            opp = sum(not f for f in v["folded"]) - 1
+            eq = odds.equity(hole, board, opp, sims)
+            need = odds.pot_odds(v["to_call"], v["pot"])
+            outs = odds.outs(hole, board)
+            fair = 1 / (opp + 1)
+            if v["to_call"]:
+                verdict = "call_plus_ev" if eq >= need else "call_minus_ev"
+            else:
+                verdict = "value_bet" if eq > fair * 1.4 else "check"
+            self._odds = (v, {
+                "hand_no": self.hand_no, "street": v["street"], "to_call": v["to_call"],
+                "pot": v["pot"], "opponents": opp, "pot_odds": round(need, 4),
+                "equity": round(eq, 4), "fair_share": round(fair, 4),
+                "ev": round(eq * (v["pot"] + v["to_call"]) - v["to_call"], 2),
+                "verdict": verdict,
                 "made": e.hand_name(e.evaluate(hole + board)) if board else None,
-                "outs": [_card(c) for c in outs]}
+                "outs": [_card(c) for c in outs],
+                # rule of 4 (two cards to come) / rule of 2 (one)
+                "hit_by_river": min(1.0, len(outs) * (4 if len(board) == 3 else 2) / 100),
+            })
+        out = dict(self._odds[1])
+        if raise_to is not None:
+            if not v["can_raise"] or not v["min_raise_to"] <= raise_to <= v["allin_to"]:
+                raise TableError(f"raise must be {v['min_raise_to']}-{v['allin_to']}")
+            pot_after = v["pot"] + raise_to - v["my_street_bet"]
+            their_call = raise_to - v["current_bet"]
+            out["raise_to"] = raise_to
+            out["caller_needs"] = round(odds.pot_odds(their_call, pot_after), 4)
+        return out
 
     # -- snapshot --------------------------------------------------------------
     def state(self) -> dict:
