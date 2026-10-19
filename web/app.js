@@ -3,7 +3,11 @@
 "use strict";
 
 const API = "api/v1";
-const STORE_KEY = "poker.table";
+const OLD_TABLE_KEY = "poker.table";      // guests used to resume from here; now they start fresh
+// npone.dev accounts: signed-in players keep their table and get on the leaderboard.
+// Elsewhere (a local dev server) set localStorage "poker.auth" to a test npone-site's origin.
+const AUTH = location.hostname === "npone.dev" || location.hostname.endsWith(".npone.dev")
+  ? "https://npone.dev" : load("poker.auth");
 const ODDS_KEY = "poker.odds";
 const SOUND_KEY = "poker.sound";           // "0" = muted
 const VOLUME_KEY = "poker.volume";         // 0-100
@@ -24,6 +28,8 @@ let seatEls = [];        // per seat: {root, cards, plate, name, stack, say, bet
 let nextTimer = null;    // pending auto-deal
 let held = false;        // the player paused auto-deal
 let oddsCache = { key: null, data: null };
+let me = null;           // signed-in account's public stats, or null for a guest
+let ranked = false;      // does the current table count toward the leaderboard
 
 // ── storage (per-viewer convenience only) ───────────────────────────────
 function load(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -391,7 +397,7 @@ function hideWinner() { $("winner").hidden = true; $("felt").classList.remove("r
 const nextMs = () => +$("next-secs").value * 1000;
 
 function scheduleNext() {
-  if (nextTimer || held || busy || $("history").open) return;
+  if (nextTimer || held || busy || document.querySelector("dialog[open]")) return;
   const ring = $("next-ring"), ms = nextMs();
   ring.style.animation = "none";
   $("next").classList.toggle("manual", !ms);
@@ -526,7 +532,7 @@ function render() {
   const s = cur;
   $("setup").hidden = true;
   $("table-view").hidden = false;
-  $("hand-info").textContent = s.hand_no ? `Hand ${s.hand_no} · blinds ${s.sb}/${s.bb}` : `Blinds ${s.sb}/${s.bb}`;
+  renderInfo();
   const winners = s.result && !s.in_hand ? [...new Set(s.result.pots.flatMap((p) => p.winners))] : [];
   updateSeats(s, { acting: s.to_act ? s.hero : null, winners });
   updateCenter(s.board, s.pot);
@@ -790,6 +796,87 @@ function togglePlay() {
   }, 1100);
 }
 
+// ── accounts and the leaderboard ─────────────────────────────────────────
+// Sign-in lives at npone.dev; its /auth/token (readable only by this origin) gives a short-lived
+// token the poker server checks with npone.dev. Guests never send one.
+async function authToken() {
+  if (!AUTH) return null;
+  try {
+    const r = await fetch(`${AUTH}/auth/token?aud=poker`, { credentials: "include", signal: AbortSignal.timeout(6000) });
+    const b = await r.json();
+    return b.signed_in ? b : null;
+  } catch { return null; }
+}
+
+const fmtNet = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toLocaleString();
+
+function renderAccount() {
+  const a = $("account");
+  a.replaceChildren();
+  if (me) {
+    const chip = el("button", "small acct", `★ ${me.name}`);
+    chip.type = "button";
+    chip.title = "Signed in with npone.dev: your table and stats are kept";
+    chip.addEventListener("click", openBoard);
+    a.append(chip);
+    $("setup-note").textContent = "Signed in as " + me.name + ". 4 players, 100 chips, blinds 1/2 is ranked; "
+      + "other settings are practice. Your table is saved between hands.";
+  } else {
+    a.append(el("span", "muted", "Guest · "));
+    if (AUTH) {
+      const link = el("a", "", "Sign in");
+      link.href = `${AUTH}/login`;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.title = "Sign in at npone.dev to keep your progress and join the leaderboard";
+      a.append(link);
+    }
+    $("setup-note").textContent = "Playing as a guest: nothing is saved, and a reload starts fresh."
+      + (AUTH ? " Sign in at npone.dev to keep your progress and get on the leaderboard." : "");
+  }
+  if (cur && !$("table-view").hidden) renderInfo();
+}
+
+function renderInfo() {
+  const s = cur;
+  $("hand-info").textContent = (s.hand_no ? `Hand ${s.hand_no} · blinds ${s.sb}/${s.bb}` : `Blinds ${s.sb}/${s.bb}`)
+    + (me ? (ranked ? " · ranked" : " · practice") : "");
+}
+
+async function openBoard() {
+  cancelNext();
+  const t = me ? await authToken() : null;
+  let b;
+  try { b = await api("leaderboard", t ? { token: t.token } : {}); } catch (err) { $("error").textContent = err.message; return; }
+  if (b.you) me = b.you;
+  const rows = b.top.map((r) => {
+    const tr = el("tr", me && b.you && r.rank === b.you.rank ? "you" : "");
+    for (const v of [r.rank, r.name, fmtNet(r.net), r.hands.toLocaleString(), r.wins, r.best_pot.toLocaleString()]) tr.append(el("td", "", String(v)));
+    tr.children[2].className = r.net > 0 ? "up" : r.net < 0 ? "down" : "";
+    return tr;
+  });
+  if (!rows.length) {
+    const tr = el("tr"), td = el("td", "empty", "No ranked hands yet. Be the first.");
+    td.colSpan = 6; tr.append(td); rows.push(tr);
+  }
+  $("lb-rows").replaceChildren(...rows);
+  const you = $("lb-you");
+  you.replaceChildren();
+  if (b.you) {
+    const y = b.you;
+    you.append(el("b", "", y.name), el("span", "", y.rank ? `Rank #${y.rank}` : "Not ranked yet"),
+      el("span", y.net > 0 ? "up" : y.net < 0 ? "down" : "", `${fmtNet(y.net)} chips`),
+      el("span", "", `${y.hands} hands · ${y.sessions} sessions · ${y.wins} tables won`));
+  } else {
+    you.append(el("span", "", AUTH ? "Playing as a guest. Sign in at npone.dev to keep your progress and appear here." : "Playing as a guest."));
+  }
+  const rs = b.ranked_settings;
+  $("lb-note").textContent = `Counts every finished hand at the ranked settings (${rs.players} players, ${rs.stack} chips, blinds ${rs.sb}/${rs.bb}), `
+    + "across all your sessions. Leaving a hand you're in counts as folding it.";
+  renderAccount();
+  if (!$("leaderboard").open) $("leaderboard").showModal();
+}
+
 // ── actions ──────────────────────────────────────────────────────────────
 async function send(path, body) {
   if (busy) return;
@@ -806,7 +893,7 @@ async function send(path, body) {
     await replay(state);
   } catch (err) {
     disp = null;
-    if (err.status === 404) { save(STORE_KEY, null); showSetup("That table has expired. Start a new one."); return; }
+    if (err.status === 404) { showSetup("That table has expired. Start a new one."); return; }
     $("error").textContent = err.message;
     try { await replay(await api(`tables/${tid}`)); } catch {}   // resync (e.g. another tab acted)
   } finally {
@@ -857,9 +944,14 @@ async function createTable(ev) {
   const body = Object.fromEntries([...f].map(([k, v]) => [k, parseInt(v, 10)]));
   $("setup-error").textContent = "";
   try {
+    if (me) {
+      const t = await authToken();
+      if (t) body.token = t.token;
+      else { me = null; renderAccount(); }             // signed out elsewhere: play as a guest
+    }
     const res = await api("tables", body);
     tid = res.id;
-    save(STORE_KEY, tid);
+    ranked = res.ranked;
     cur = res.state;
     seatEls = [];
     $("log").replaceChildren();
@@ -883,6 +975,20 @@ $("btn-hold").addEventListener("click", hold);
 $("btn-again").addEventListener("click", () => showSetup());
 $("btn-replay").addEventListener("click", () => openHistory(cur && cur.hand_no));
 $("btn-history").addEventListener("click", () => openHistory());
+$("btn-board").addEventListener("click", openBoard);
+$("lb-close").addEventListener("click", () => $("leaderboard").close());
+$("leaderboard").addEventListener("close", () => { if (cur && !busy && !$("table-view").hidden) render(); });
+$("leaderboard").addEventListener("click", (e) => { if (e.target === $("leaderboard")) $("leaderboard").close(); });
+// signed in at npone.dev in another tab? pick it up when they come back (the next game counts)
+let lastAuthCheck = 0;
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden || me || !AUTH || Date.now() - lastAuthCheck < 30000) return;
+  lastAuthCheck = Date.now();
+  const t = await authToken();
+  if (!t) return;
+  try { me = (await api("leaderboard", { token: t.token })).you; } catch { return; }
+  renderAccount();
+});
 $("hist-close").addEventListener("click", () => $("history").close());
 $("history").addEventListener("close", () => { stopPlay(); if (cur && !busy && !$("table-view").hidden) render(); });
 $("history").addEventListener("click", (e) => { if (e.target === $("history")) $("history").close(); });   // backdrop
@@ -922,6 +1028,7 @@ $("odds-toggle").addEventListener("change", (e) => { save(ODDS_KEY, e.target.che
 addEventListener("resize", () => { if (cur && seatEls.length) positionSeats(cur); });
 
 document.addEventListener("keydown", (e) => {
+  if ($("leaderboard").open) return;
   if ($("history").open) {
     if (e.target.matches("select, input[type=range]")) return;
     const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
@@ -937,6 +1044,7 @@ document.addEventListener("keydown", (e) => {
   if ($("table-view").hidden) return;
   const k = e.key.toLowerCase();
   if (k === "o") { $("odds-toggle").click(); return; }
+  if (k === "l") { openBoard(); return; }
   if (k === "h") { if (!$("btn-history").disabled) openHistory(); return; }
   if (k === "m") { $("sound-toggle").click(); return; }
   if (busy) return;
@@ -954,13 +1062,23 @@ document.addEventListener("keydown", (e) => {
 });
 
 (async function boot() {
-  tid = load(STORE_KEY);
-  if (!tid) { showSetup(); return; }
-  try {
-    cur = await api(`tables/${tid}`);
-    render();
-  } catch (err) {
-    if (err.status === 404) { save(STORE_KEY, null); showSetup(); return; }
-    showSetup(`Couldn't load your table (${err.message}). Reload to try again.`);
+  save(OLD_TABLE_KEY, null);
+  const t = await authToken();
+  if (t) {
+    try {
+      const s = await api("session", { token: t.token });
+      me = s.account;
+      if (s.table) {                                    // your table, as you left it
+        tid = s.table; ranked = s.ranked; cur = s.state;
+        renderAccount();
+        render();
+        return;
+      }
+    } catch (err) {
+      $("setup-error").textContent = `Couldn't restore your progress (${err.message}); playing as a guest.`;
+      me = null;
+    }
   }
+  renderAccount();
+  showSetup($("setup-error").textContent);
 })();

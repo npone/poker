@@ -44,6 +44,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 | `server.py` | — | **HTTP API** `/api/v1` (FastAPI) over `table.py`, + serves `web/`. In-memory tables, capped/idle-evicted, per-table lock |
 | `bots.py` | — | Equity bots (`make_bot(seed, risk=None)`, `BOT_NAMES`, `SIMS`), shared by CLI and server; `play.py` re-exports it. Each bot gets a random risk tolerance 0–1 (`policy.risk`). **Never expose it in `state`** — Ning: the player must not see bot styles |
 | `odds.py` | — | `fast_eval` (same tuples as `engine.evaluate`, ~10 µs), `equity` (Monte Carlo vs random hands), `outs`, `pot_odds` |
+| `store.py` | — | SQLite (`data/poker.db`, mode 600, gitignored) for signed-in players: `accounts` (ranked lifetime stats), `saved` (each player's table snapshot + `pending` hand marker) |
 | `conftest.py` | — | Sets `bots.SIMS = 20` so the suite stays fast; production uses 250 |
 | `play.py` | — | **Interactive CLI** (argparse) — you + bots in the terminal |
 | `test_table.py` / `test_server.py` | — | Session fuzz (chips conserved, cards hidden, games end, JSON-able) / HTTP contract |
@@ -209,6 +210,19 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
   (`hands()`, `hand_record(n)`, `GET …/hands[/{n}]`); the web `<dialog>` steps through one by
   folding its events (H key, or "Replay this hand" on the end-of-hand overlay); auto-deal
   waits while it is open.
+- Accounts + leaderboard (Ning, 2026-10-19): sign-in is the npone.dev account. Poker trusts
+  only npone-site's `/auth/introspect` (`POKER_AUTH_URL`, default `http://127.0.0.1:8090`).
+  npone-site's `AUDIENCES` must list `poker` → `https://poker.npone.dev`. Ranked = `RANKED` in
+  `server.py` (4 players, 100 chips, 1/2). `BOOT` tells a restart (void hand) from walking
+  away (forfeit); a restart therefore lets a hand in progress be abandoned free (accepted).
+  `_account_lock` keeps one bound table per account; a replaced entry gets `account=None`
+  under `ent.lock`, which `_call` also holds: whichever takes the lock first decides (hand
+  counted, or forfeit). Do not add a `_by_account` check in `_persist`: it lost such hands. Sign-in checks
+  are rate-limited per IP (`AUTH_LIMIT`); npone tokens are one-time nonces. The unit's only
+  writable path is `data/` (`ReadWritePaths`). Guests are never stored, and the client no
+  longer resumes them from localStorage. Tests fake introspect (`accounts` fixture in
+  `test_server.py`). The e2e check used a throwaway npone-site on :8096 whose
+  `AUDIENCES` trusted :8095, with `localStorage["poker.auth"]` pointing the page at it.
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
   (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
 - `README.md` still claims nothing beyond what is true; it documents the API and deploy.
