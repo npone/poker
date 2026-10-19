@@ -42,7 +42,9 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 | `engine.py` | 473 | **The engine (current).** `Card`, `Deck`, `evaluate5`/`evaluate`/`hand_name`, `Player`, `HoldemGame` (betting rounds, side pots, showdown, multi-hand), built-in bot policies |
 | `table.py` | — | **Session layer** every front end drives: hero (seat 0) vs bots; `deal()`, `act(kind, amount)`, `state()` → JSON snapshot with an `events` log. Hides other players' hole cards except at showdown |
 | `server.py` | — | **HTTP API** `/api/v1` (FastAPI) over `table.py`, + serves `web/`. In-memory tables, capped/idle-evicted, per-table lock |
-| `bots.py` | — | Bot policy (`make_bot`, `BOT_NAMES`), shared by CLI and server; `play.py` re-exports it |
+| `bots.py` | — | Equity bots (`make_bot(seed, risk=None)`, `style`, `BOT_NAMES`, `SIMS`), shared by CLI and server; `play.py` re-exports it. Each bot gets a random risk tolerance 0–1 (`policy.risk`) |
+| `odds.py` | — | `fast_eval` (same tuples as `engine.evaluate`, ~10 µs), `equity` (Monte Carlo vs random hands), `outs`, `pot_odds` |
+| `conftest.py` | — | Sets `bots.SIMS = 20` so the suite stays fast; production uses 250 |
 | `play.py` | — | **Interactive CLI** (argparse) — you + bots in the terminal |
 | `test_table.py` / `test_server.py` | — | Session fuzz (chips conserved, cards hidden, games end, JSON-able) / HTTP contract |
 | `../web/` | — | Static web client (`index.html`, `app.js`, `style.css`), no build step, no framework, **no game rules** |
@@ -64,7 +66,7 @@ Two generations of code share `src/`. Treat them as separate codebases; they sha
 ```bash
 cd /home/nliu/dev/poker/src
 
-# Tests — 41 passed in ~3s  ✅  (also the .taskhub.json `test` command)
+# Tests — 47 passed in ~8s  ✅  (also the .taskhub.json `test` command)
 python -m pytest -q
 
 # Web game locally
@@ -82,8 +84,8 @@ python demo_ascii.py   # legacy: ASCII-rendered deal + score (needs numpy)
 python test.py         # legacy scratch: prints ASCII cards only
 ```
 
-Breakdown of the 41: **21** in `test_engine.py`, **7** in `test_server.py`, **6** in
-`test_table.py`, **4** each in `test_evaluator.py` and `test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
+Breakdown of the 47: **21** in `test_engine.py`, **7** in `test_server.py`, **6** in
+`test_table.py`, **5** in `test_odds.py`, **4** each in `test_evaluator.py` and `test_play.py`. No failures, no skips. `test.py` contributes 0 collected tests (it just prints
 ASCII cards at import).
 
 **Lint:** no config, no CI, not a project gate. `ruff check .` (ruff 0.15.16 defaults) reports
@@ -136,10 +138,11 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 
 - **Run from `src/`.** Imports are flat module names; `cd src` first (pytest also works from the
   repo root because it prepends the test file's directory).
-- **There is no solver and no equity/Monte-Carlo module.** The only "math" is the exact hand
-  evaluator in `engine.py` (and the legacy classifier in `pokerClass.py`). `play.py`'s bot uses
-  a crude pot-odds heuristic (`to_call / (pot + to_call)`) plus a random per-bot `aggression`
-  multiplier — it is not a solver and makes no claim to be one. `demo_ascii.py`'s comment
+- **There is no solver.** `odds.py` estimates equity by Monte Carlo against *random* hands; the
+  bots discount it when facing a bet and weigh it against pot odds and stack at risk, scaled by
+  their risk tolerance. Not game-theory optimal, and it makes no claim to be. `odds.fast_eval`
+  must stay equal to `engine.evaluate` (`test_odds.py` pins it); the engine's evaluator remains
+  the one that decides showdowns. `demo_ascii.py`'s comment
   "a test program for calculating chances in poker games" is aspirational; it computes no
   chances.
 - `engine.py` and `pokerClass.py` **both define a `Card` class** and they are incompatible.
@@ -186,7 +189,12 @@ Evaluator: `e.evaluate(e.cards("Ah Kh Qh Jh Th 2c 3d"))` → a comparable
 - Stage 1 (web, you vs bots) built on branch `web-game`: step-by-step engine (`hand()`), the
   uncalled-chip fix, `table.py`, `server.py`, `web/`, `deploy/`, `.taskhub.json`. 41 tests pass.
   Verified in headless Chromium: desktop, phone 390 px (no horizontal scroll), dark mode, reload
-  resumes the table, no console errors.
+  resumes the table, no console errors. Shipped (PR #3).
+- Smoother play (Ning, 2026-10-18), branch `smoother-play`: hands auto-deal 4 s after a winner
+  overlay (Hold / Deal now); chips fly to bets, pot and winners; cards deal, flip and muck;
+  textured buttons and table; equity bots with a random risk tolerance; an optional odds helper
+  (header toggle or `O`) fed by `GET /api/v1/tables/{id}/odds`. Animations are WAAPI on
+  persistent seat elements (`buildSeats` once, `updateSeats` per event), not DOM rebuilds.
 - Not yet: iOS/Android apps (no Xcode/Android SDK on dev176), multiplayer, accounts/persistence
   (tables are lost on restart), ruff cleanup (46 stylistic findings; leave them).
 - `README.md` still claims nothing beyond what is true; it documents the API and deploy.
