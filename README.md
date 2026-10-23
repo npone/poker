@@ -38,8 +38,10 @@ python play.py                          # play against the bots (you + 3 bots)
 python play.py --players 6 --stack 200  # options: --players --stack --sb --bb --seed
 python poker.py                         # watch a bot-vs-bot demo game
 python -m pytest -q                     # all tests
-uvicorn server:app --port 8094          # web game at http://127.0.0.1:8094/
+uvicorn server:app --port 8000          # web game at http://127.0.0.1:8000/
 ```
+
+At your turn in the CLI: `k`=check  `c`=call  `f`=fold  `b/r <N>`=bet/raise to N  `a`=all-in  `q`=quit.
 
 ## HTTP API (`/api/v1`)
 
@@ -80,13 +82,12 @@ account id and the profile name; poker never sees an email. For them:
   is evicted, the chips you had in the pot count as lost. A hand cut short by a server restart
   is void.
 
-## Deploy ([private-host])
+## Deploy
 
-`poker.service` (uvicorn on `127.0.0.1:8094`, low priority) and the `poker.npone.dev` tunnel route
-are generated from `npone-site/deploy/[private-config]` by `npone-site/deploy/sync-hosts.py` (PORTABILITY.md step D): change them there, never in `/etc`. The service runs from this
-checkout: `sudo systemctl restart poker` after merging to `master`.
-
-At your turn: `k`=check  `c`=call  `f`=fold  `b/r <N>`=bet/raise to N  `a`=all-in  `q`=quit.
+Run `uvicorn server:app` from `src/` on a local port behind any reverse proxy that terminates TLS.
+Settings come from the environment: `POKER_DB` sets where saved tables and stats live (default
+`data/poker.db`), and `POKER_AUTH_URL` sets the npone.dev account service used to check sign-in
+tokens.
 
 ## Using the engine
 
