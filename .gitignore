@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 data/
+# Agent instructions describe the private deployment; kept local only (public repo).
+CLAUDE.md

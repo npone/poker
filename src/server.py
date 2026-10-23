@@ -50,7 +50,7 @@ IDLE_SECONDS = 2 * 3600             # only idle tables are evicted; when full of
 CREATE_LIMIT = (20, 600)            # new tables per client IP per window (count, seconds)
 AUTH_LIMIT = (120, 600)             # sign-in checks (each one asks npone.dev) per client IP
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-AUTH_URL = os.environ.get("POKER_AUTH_URL", "http://127.0.0.1:8090")   # npone-site, same box
+AUTH_URL = os.environ.get("POKER_AUTH_URL", "http://127.0.0.1:8090")   # the npone.dev account service
 RANKED = {"players": 4, "stack": 100, "sb": 1, "bb": 2}   # only this counts on the leaderboard
 BOOT = secrets.token_hex(6)         # tells "server restarted mid-hand" from "player walked away"
 
@@ -155,7 +155,7 @@ def _call(tid: str, fn, persist: bool = False):
 
 
 def _ip(request: Request) -> str:
-    # behind the Cloudflare tunnel every request comes from localhost; CF names the client
+    # behind a reverse proxy the peer is the proxy; Cloudflare names the real client in a header
     return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "")
 
 
